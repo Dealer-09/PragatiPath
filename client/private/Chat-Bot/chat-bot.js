@@ -28,13 +28,20 @@ async function sendChatMessage() {
     try {
         const res = await fetch(window.location.origin + "/api/gemini/chat", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: {
+                "Content-Type": "application/json",
+                "x-gemini-key": localStorage.getItem('gemini_api_key') || ''
+            },
             body: JSON.stringify({ query })
         });
         const data = await res.json();
-        botDiv.innerHTML = typeof marked !== "undefined"
-            ? marked.parse(data.response || data.error || "Error")
-            : (data.response || data.error || "Error");
+        if (data.error && data.error.includes('No Gemini API key')) {
+            botDiv.innerHTML = "⚠️ No Gemini API key set. Go to the dashboard and click <b>🔑 API Key</b> to add yours.";
+        } else {
+            botDiv.innerHTML = typeof marked !== "undefined"
+                ? marked.parse(data.response || data.error || "Error")
+                : (data.response || data.error || "Error");
+        }
     } catch (err) {
         botDiv.innerHTML = "Failed to connect. Please try again.";
     }

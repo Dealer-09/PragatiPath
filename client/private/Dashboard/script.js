@@ -3,6 +3,68 @@ const logoutIcon = document.querySelector("#logout-icon");
 
 let userData = null;
 
+// ── BYOK: Gemini API Key Management ──────────────────────────────────────────
+function getGeminiKey() {
+    return localStorage.getItem('gemini_api_key') || '';
+}
+
+function geminiHeaders() {
+    return {
+        'Content-Type': 'application/json',
+        'x-gemini-key': getGeminiKey()
+    };
+}
+
+function updateKeyStatusDot() {
+    const dot = document.getElementById('key-status-dot');
+    if (!dot) return;
+    if (getGeminiKey()) {
+        dot.classList.add('active');
+        dot.title = 'Gemini key is set';
+    } else {
+        dot.classList.remove('active');
+        dot.title = 'No Gemini key — click to set';
+    }
+}
+
+function openKeyModal() {
+    document.getElementById('key-modal-overlay').style.display = 'block';
+    document.getElementById('key-modal').style.display = 'flex';
+    const input = document.getElementById('key-input');
+    input.value = getGeminiKey();
+    document.getElementById('key-modal-status').textContent = '';
+    setTimeout(() => input.focus(), 50);
+}
+
+function closeKeyModal() {
+    document.getElementById('key-modal-overlay').style.display = 'none';
+    document.getElementById('key-modal').style.display = 'none';
+}
+
+function saveGeminiKey() {
+    const val = document.getElementById('key-input').value.trim();
+    if (!val) {
+        document.getElementById('key-modal-status').style.color = '#c00';
+        document.getElementById('key-modal-status').textContent = 'Key cannot be empty.';
+        return;
+    }
+    localStorage.setItem('gemini_api_key', val);
+    updateKeyStatusDot();
+    document.getElementById('key-modal-status').style.color = '#4CAF50';
+    document.getElementById('key-modal-status').textContent = '✅ Key saved!';
+    setTimeout(closeKeyModal, 900);
+}
+
+function clearGeminiKey() {
+    localStorage.removeItem('gemini_api_key');
+    document.getElementById('key-input').value = '';
+    updateKeyStatusDot();
+    document.getElementById('key-modal-status').style.color = '#c00';
+    document.getElementById('key-modal-status').textContent = 'Key cleared.';
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
+
 logoutBtn.addEventListener('mouseenter', () => {
     logoutIcon.setAttribute('fill', 'red');
 });
@@ -201,13 +263,16 @@ function setupChat() {
         const msgDiv = addMessage("...", false);
         const res = await fetch('/api/gemini/chat', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: geminiHeaders(),
             body: JSON.stringify({ query: message })
         });
 
         const data = await res.json();
         if (data.error) {
-            addMessage("Error: " + data.error, false);
+            const errMsg = data.error.includes('No Gemini API key')
+                ? 'No API key set. Click 🔑 API Key in the header to add yours.'
+                : 'Error: ' + data.error;
+            msgDiv.innerHTML = errMsg;
         } else {
             msgDiv.innerHTML = marked.parse(data.response);
         }
@@ -343,7 +408,9 @@ window.addEventListener('load', async () => {
     generateCalendar();
     loadNotes();
     setupChat();
+    updateKeyStatusDot();
 });
+
 
 function showSection(targetId) {
     document.querySelectorAll('section').forEach(section => {

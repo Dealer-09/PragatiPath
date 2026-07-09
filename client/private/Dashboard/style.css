@@ -1481,4 +1481,152 @@ body>.skiptranslate>iframe.skiptranslate {
 
 .cert-btn:hover {
     background: #388E3C;
-}
+}
+
+/* ── BYOK API Key Modal ── */
+#api-key-btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 14px;
+    background: rgba(255,255,255,0.12);
+    border: 1px solid rgba(255,255,255,0.25);
+    border-radius: 20px;
+    color: #191923;
+    font-size: 0.82rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.2s;
+    white-space: nowrap;
+    margin-left: auto;
+}
+
+#api-key-btn:hover {
+    background: rgba(0,0,0,0.08);
+}
+
+#key-status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+    background: #ccc;
+    flex-shrink: 0;
+}
+
+#key-status-dot.active {
+    background: #4CAF50;
+    box-shadow: 0 0 6px #4CAF50;
+}
+
+#key-modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.45);
+    z-index: 9000;
+    backdrop-filter: blur(2px);
+}
+
+#key-modal {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 9001;
+    background: #fff;
+    border-radius: 18px;
+    padding: 28px 32px;
+    width: min(420px, 92vw);
+    box-shadow: 0 20px 60px rgba(0,0,0,0.25);
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+#key-modal h3 {
+    margin: 0;
+    font-size: 1.1rem;
+    color: #191923;
+}
+
+#key-modal p {
+    margin: 0;
+    font-size: 0.85rem;
+    color: #555;
+    line-height: 1.5;
+}
+
+#key-modal a {
+    font-size: 0.85rem;
+    color: #1a73e8;
+    text-decoration: none;
+}
+
+#key-modal a:hover { text-decoration: underline; }
+
+#key-input {
+    width: 100%;
+    padding: 10px 14px;
+    border: 1.5px solid #ccc;
+    border-radius: 10px;
+    font-size: 0.9rem;
+    font-family: monospace;
+    box-sizing: border-box;
+    transition: border-color 0.2s;
+}
+
+#key-input:focus {
+    outline: none;
+    border-color: #4CAF50;
+}
+
+#key-modal-actions {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+#key-save-btn {
+    background: #4CAF50;
+    color: #fff;
+    border: none;
+    border-radius: 10px;
+    padding: 8px 20px;
+    cursor: pointer;
+    font-weight: 600;
+    transition: background 0.2s;
+}
+
+#key-save-btn:hover { background: #388E3C; }
+
+#key-clear-btn {
+    background: rgba(200,0,0,0.1);
+    color: #c00;
+    border: none;
+    border-radius: 10px;
+    padding: 8px 16px;
+    cursor: pointer;
+    font-weight: 600;
+    transition: background 0.2s;
+}
+
+#key-clear-btn:hover { background: rgba(200,0,0,0.2); }
+
+#key-close-btn {
+    background: rgba(0,0,0,0.07);
+    color: #333;
+    border: none;
+    border-radius: 10px;
+    padding: 8px 16px;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+#key-close-btn:hover { background: rgba(0,0,0,0.13); }
+
+#key-modal-status {
+    font-size: 0.82rem;
+    min-height: 1em;
+    color: #4CAF50;
+}
+
