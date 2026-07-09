@@ -1,60 +1,70 @@
-#ai-toolkit {
-    font-family: 'Poppins', sans-serif;
+/* ============================
+   Standalone AI Toolkit Page
+   ============================ */
+
+body {
+    font-family: 'Poppins', Arial, sans-serif;
+    background-color: #f0f8ff;
+    text-align: center;
     margin: 0;
-    padding: 0;
-    background: #f9f9f9;
+    padding: 20px;
     color: #333;
-  }
-  
-  .ai-toolkit-heading {
+}
+
+header {
     background: #4CAF50;
     color: white;
     padding: 2rem 1rem;
     text-align: center;
     box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
-  }
-  
-  .ai-toolkit-heading h1 {
+    margin-bottom: 2rem;
+}
+
+header h1 {
     margin: 0;
     font-size: 2.5rem;
-  }
-  
-  .ai-toolkit-heading p {
+}
+
+header p {
     margin: 0.5rem 0 0;
     font-size: 1.2rem;
     opacity: 0.9;
-  }
-  
-  .ai-toolkit-container {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+}
+
+/* Card Layout */
+.card-container {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
     gap: 1.5rem;
-    padding: 2rem;
+    padding: 1rem;
     max-width: 1200px;
     margin: auto;
-  }
-  
-  .card {
-    background: white;
-    border-radius: 12px;
-    /* height: 100%; */
+}
+
+.card {
+    background-color: white;
+    border-radius: 15px;
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
     padding: 1.5rem;
-    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.08);
+    width: 300px;
+    min-height: 350px;
+    text-align: center;
     transition: transform 0.2s, box-shadow 0.2s;
-  }
-  
-  .card:hover {
+}
+
+.card:hover {
     transform: translateY(-5px);
-    box-shadow: 0 8px 16px rgba(0, 0, 0, 0.12);
-  }
-  
-  .card h2 {
+    box-shadow: 0 8px 16px rgba(0, 0, 0, 0.15);
+}
+
+.card h2 {
     margin-top: 0;
-    font-size: 1.6rem;
+    font-size: 1.4rem;
     color: #4CAF50;
-  }
-  
-  .ai-toolkit-container button {
+}
+
+.card button {
     background: #4CAF50;
     color: white;
     border: none;
@@ -64,41 +74,109 @@
     cursor: pointer;
     margin-top: 0.8rem;
     transition: background 0.3s;
-  }
-  
-  .ai-toolkit-container button:hover {
+}
+
+.card button:hover {
     background: #45A049;
-  }
-  
-  input[type="text"],
-  input[type="file"] {
+}
+
+input[type="file"] {
+    margin-top: 10px;
     width: 100%;
-    padding: 0.6rem;
-    margin-top: 0.8rem;
+    padding: 0.5rem;
     border: 1px solid #ccc;
     border-radius: 6px;
-    font-size: 1rem;
-  }
-  
-  #prediction {
-    margin-top: 1rem;
-    font-weight: 600;
+    font-size: 0.95rem;
+}
+
+img#image {
+    margin-top: 10px;
+    width: 224px;
+    height: 224px;
+    border: 2px solid #ccc;
+    object-fit: cover;
+}
+
+#prediction,
+#weatherResult,
+#soil-tips {
+    margin-top: 15px;
+    font-size: 16px;
+    font-weight: 500;
     color: #555;
-  }
-  
-  #weatherResult {
+}
+
+#map {
     margin-top: 1rem;
-    font-size: 1rem;
-    color: #333;
-  }
-  
-  #map {
-    height: 200px;
     border-radius: 8px;
-    margin-top: 1rem;
-  }
-  
-  .loader {
+    overflow: hidden;
+}
+
+iframe {
+    width: 100%;
+    height: 250px;
+    border: none;
+    border-radius: 8px;
+}
+
+/* ============================
+   Dashboard-embedded Toolkit
+   ============================ */
+
+#ai-toolkit {
+    font-family: 'Poppins', sans-serif;
+}
+
+.ai-toolkit-heading {
+    background: #4CAF50;
+    color: white;
+    padding: 2rem 1rem;
+    text-align: center;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+}
+
+.ai-toolkit-heading h1 {
+    margin: 0;
+    font-size: 2.5rem;
+}
+
+.ai-toolkit-heading p {
+    margin: 0.5rem 0 0;
+    font-size: 1.2rem;
+    opacity: 0.9;
+}
+
+.ai-toolkit-container {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 1.5rem;
+    padding: 2rem;
+    max-width: 1200px;
+    margin: auto;
+}
+
+.ai-toolkit-container .card {
+    width: auto;
+    min-height: auto;
+}
+
+.ai-toolkit-container button {
+    background: #4CAF50;
+    color: white;
+    border: none;
+    padding: 0.6rem 1.2rem;
+    font-size: 1rem;
+    border-radius: 6px;
+    cursor: pointer;
+    margin-top: 0.8rem;
+    transition: background 0.3s;
+}
+
+.ai-toolkit-container button:hover {
+    background: #45A049;
+}
+
+.loader {
     border: 6px solid #f3f3f3;
     border-top: 6px solid #4CAF50;
     border-radius: 50%;
@@ -107,10 +185,9 @@
     animation: spin 1s linear infinite;
     margin: 1rem auto;
     display: none;
-  }
-  
-  @keyframes spin {
+}
+
+@keyframes spin {
     0% { transform: rotate(0deg); }
-    100% { transform: rotate(360deg);
-    }
-  }
+    100% { transform: rotate(360deg); }
+}

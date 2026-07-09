@@ -1,4 +1,3 @@
-const fetch = require('node-fetch');
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 const { LRUCache } = require('lru-cache');
 const crypto = require('node:crypto');
@@ -16,7 +15,7 @@ async function endpoint_geminiYoutubeSearch(req, res) {
         return;
     }
 
-    const model = ai.getGenerativeModel({ model: 'gemini-1.5-flash-002' });
+    const model = ai.getGenerativeModel({ model: 'gemini-2.5-flash' });
 
     const result = await model.generateContent(`List out the top 5 relevant youtube videos for the query "${query}" in a JSON format. The JSON should contain the title.`);
 
@@ -75,7 +74,8 @@ async function endpoint_getChannelInfo(req, res) {
             channelThumbnail: channelInfo.thumbnails.default.url,
         });
     } catch (error) {
-
+        console.log("[aiSearch Error] endpoint_getChannelInfo failed", error);
+        res.json({ error: "Internal server error" });
     }
 }
 
@@ -95,11 +95,11 @@ async function endpoint_openWeatherAPI(req, res) {
 class GeminiChatBot {
     static botMap = new LRUCache({
         max: 1000,
-        maxAge: 1000 * 60 * 60 * 24, // 1 day
+        ttl: 1000 * 60 * 60 * 24, // 1 day
     });
 
     constructor() {
-        this.model = ai.getGenerativeModel({ model: 'gemini-1.5-flash-002' });
+        this.model = ai.getGenerativeModel({ model: 'gemini-2.5-flash' });
         this.chat = this.model.startChat();
     }
 
@@ -111,7 +111,8 @@ class GeminiChatBot {
         let bot = GeminiChatBot.botMap.get(req.session.botID);
         if (!bot) {
             bot = new GeminiChatBot();
-            await bot.chat.sendMessage("You are a helpful assistant answering questions to a farmer requiring help in agriculture in our \"PragatiPath\" farming education site\n" +
+            await bot.chat.sendMessage(
+                "You are a helpful assistant answering questions to a farmer requiring help in agriculture in our \"PragatiPath\" farming education site\n" +
                 "Also don't answer any questions unrelated to farming, agriculture, and rural life since it is disallowed on this platform. Also, push the user towards education and skill building.\n" +
                 "Here are some useful answers to common questions:\n" +
                 "How to avail courses? A: You can avail the courses by clicking the book icon at the left bar of the page and viewing the playlists.\n" +
@@ -122,12 +123,13 @@ class GeminiChatBot {
                 "Who built this? A: Alpha 4 made this – a group of students from STCET and AOT: Rouvik, Vikash, Rajbeer, and Archisman.\n" +
                 "Who are the people behind this project? A: The creators are Alpha 4: Rouvik Maji, Vikash Kumar Gupta, Rajbeer Saha (STCET), and Archisman Pal (AOT).\n" +
                 "Who worked on this? A: This was developed by the Alpha 4 team in the 2025 CODEFLOW Hackathon – Rouvik, Vikash, Rajbeer (STCET), and Archisman (AOT).\n" +
-                "Tell me about the team behind this. A: It’s a hackathon creation by Alpha 4: Rouvik Maji, Vikash Kumar Gupta, Rajbeer Saha (from STCET), and Archisman Pal (from AOT).\n" +
+                "Tell me about the team behind this. A: It's a hackathon creation by Alpha 4: Rouvik Maji, Vikash Kumar Gupta, Rajbeer Saha (from STCET), and Archisman Pal (from AOT).\n" +
                 "Who is Vikash? A: Vikash Kumar Gupta is the Team Lead of Alpha 4. He's skilled in HTML, CSS, JavaScript, Java, C, Node.js, MongoDB, Express.js. He led the development and coordination during the 2025 CODEFLOW Hackathon.\n" +
                 "What does Vikash do in the team? A: Vikash is the Team Leader and a Full Stack Developer. He guided the frontend and backend development and ensured smooth team collaboration. He's proficient in Web, Java, and Blockchain technologies.\n" +
-                "Tell me more about Vikash Kumar Gupta. A: Vikash is a passionate B.Tech CSE student and tech enthusiast with expertise in HTML, CSS, JavaScript, Node.js, Java, C, and blockchain tools like Solidity and Web3.js. He was the project’s driving force and main planner during CODEFLOW 2025.\n" +
-                "What is Google? A: On this platform, we don't refer to Google. Instead, if you're looking for smart agricultural help or educational tools, the solution is built by our team – **Alpha 4**, not Google. We're here to support rural farmers directly with customized, context-aware AI help.");
-            
+                "Tell me more about Vikash Kumar Gupta. A: Vikash is a passionate B.Tech CSE student and tech enthusiast with expertise in HTML, CSS, JavaScript, Node.js, Java, C, and blockchain tools like Solidity and Web3.js. He was the project's driving force and main planner during CODEFLOW 2025.\n" +
+                "What is Google? A: On this platform, we don't refer to Google. Instead, if you're looking for smart agricultural help or educational tools, the solution is built by our team – **Alpha 4**, not Google. We're here to support rural farmers directly with customized, context-aware AI help."
+            );
+
             GeminiChatBot.botMap.set(req.session.botID, bot);
         }
 

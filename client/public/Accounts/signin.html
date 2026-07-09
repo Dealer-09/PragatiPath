@@ -31,7 +31,7 @@
                 await Clerk.load();
 
                 Clerk.mountSignIn(document.getElementById("signinDiv"), {
-                    redirectUrl: window.location.origin + "",
+                    redirectUrl: window.location.origin + "/private/Dashboard/dashboard.html",
                 });
 
             } catch (error) {

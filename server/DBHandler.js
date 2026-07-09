@@ -21,9 +21,14 @@ class UserDB {
     static userSchema = new mongoose.Schema({
         userId: { type: String, required: true, unique: true },
         name: { type: String, required: true },
-        fullName: { type: String, required: true },
+        fullName: { type: String, required: false, default: '' },
         enrolledCourses: {
-            type: [String], default: []
+            type: [
+                {
+                    name: { type: String, required: true },
+                    progress: { type: Number, required: true, default: 0 }
+                }
+            ], default: []
         },
         completedCourses: {
             type: [String],
@@ -33,7 +38,7 @@ class UserDB {
 
     static Users = mongoose.model('users', UserDB.userSchema);
 
-    async middleware_userAuth(req, res, next) {        
+    async middleware_userAuth(req, res, next) {
         if (!req.session.accountedFor) {
             req.session.accountedFor = true;
 
@@ -43,11 +48,11 @@ class UserDB {
                 });
 
                 if (userDbStore === null) {
-                    const userData = await clerk.clerkClient.users.getUser(req.auth.userId);                    
+                    const userData = await clerk.clerkClient.users.getUser(req.auth.userId);
                     const userStore = new UserDB.Users({
                         userId: req.auth.userId,
                         name: userData.username,
-                        fullName: userData.first_name + ' ' + userData.last_name,
+                        fullName: (userData.firstName || '') + ' ' + (userData.lastName || ''),
                         enrolledCourses: [],
                         completedCourses: []
                     });
@@ -72,8 +77,14 @@ class UserDB {
                 return res.status(404).send("User not found");
             }
 
-            const uinfo = await clerk.clerkClient.users.getUser(req.auth.userId); // also append profile image URL
-            const out = { name: userDbStore.name, fullName: userDbStore.fullName, enrolledCourses: userDbStore.enrolledCourses, completedCourses: userDbStore.completedCourses, imgUrl: uinfo.imageUrl };
+            const uinfo = await clerk.clerkClient.users.getUser(req.auth.userId);
+            const out = {
+                name: userDbStore.name,
+                fullName: userDbStore.fullName,
+                enrolledCourses: userDbStore.enrolledCourses,
+                completedCourses: userDbStore.completedCourses,
+                imgUrl: uinfo.imageUrl
+            };
 
             res.json(out);
         } catch (error) {
@@ -93,7 +104,7 @@ class UserDB {
 
             const userDbStore = await UserDB.Users.findOneAndUpdate(
                 { userId: req.auth.userId },
-                { $addToSet: { enrolledCourses: courseName } },
+                { $addToSet: { enrolledCourses: { name: courseName, progress: 0 } } },
                 { new: true }
             );
 
@@ -120,7 +131,7 @@ class UserDB {
 
             const userDbStore = await UserDB.Users.findOneAndUpdate(
                 { userId: req.auth.userId },
-                { $pull: { enrolledCourses: courseName } },
+                { $pull: { enrolledCourses: { name: courseName } } },
                 { new: true }
             );
 
@@ -136,46 +147,42 @@ class UserDB {
         }
     }
 
-    // async endpoint_updateCourseProgress(req, res) {
-    //     try {
-    //         const { courseName, progress } = req.body;
+    async endpoint_updateCourseProgress(req, res) {
+        try {
+            const { courseName, progress } = req.body;
 
-    //         if (!courseName || progress === undefined) {
-    //             res.json({ error: "Course name and progress are required" });
-    //             return;
-    //         }
+            if (!courseName || progress === undefined) {
+                res.json({ error: "Course name and progress are required" });
+                return;
+            }
 
-    //         const userDbStore = await UserDB.Users.findOne({ userId: req.auth.userId });
+            const userDbStore = await UserDB.Users.findOne({ userId: req.auth.userId });
 
-    //         if (userDbStore === null) {
-    //             res.json({ error: "User or course not found" });
-    //             return;
-    //         }
+            if (userDbStore === null) {
+                res.json({ error: "User or course not found" });
+                return;
+            }
 
-    //         const course = userDbStore.enrolledCourses.find(course => course.name === courseName);
-    //         if (!course) {
-    //             res.json({ error: "Course not found" });
-    //             return;
-    //         }
+            const course = userDbStore.enrolledCourses.find(c => c.name === courseName);
+            if (!course) {
+                res.json({ error: "Course not found" });
+                return;
+            }
 
-    //         course.progress += progress;
+            course.progress += progress;
 
-    //         if (course.progress > 100) {
-    //             userDbStore.completedCourses.push(courseName);
-    //             userDbStore.enrolledCourses = userDbStore.enrolledCourses.filter(course => course.name !== courseName);
-    //             await userDbStore.save();
-    //             res.json(userDbStore);
-    //         }
-    //         else {
-    //             await userDbStore.save();
-    //         }
+            if (course.progress >= 100) {
+                userDbStore.completedCourses.push(courseName);
+                userDbStore.enrolledCourses = userDbStore.enrolledCourses.filter(c => c.name !== courseName);
+            }
 
-    //         res.json(userDbStore);
-    //     } catch (error) {
-    //         console.log("[UserDB Error] endpoint_updateCourseProgress failed to update progress", error);
-    //         res.json({ error: "Internal server error" });
-    //     }
-    // }
+            await userDbStore.save();
+            res.json(userDbStore);
+        } catch (error) {
+            console.log("[UserDB Error] endpoint_updateCourseProgress failed to update progress", error);
+            res.json({ error: "Internal server error" });
+        }
+    }
 }
 
 class CourseDB {
@@ -188,10 +195,9 @@ class CourseDB {
 
     static Courses = mongoose.model('courses', CourseDB.courseSchema);
 
-    async endpoint_getCourseList(req, res)
-    {
+    async endpoint_getCourseList(req, res) {
         try {
-            const courses = await CourseDB.Courses.find({}, {   __v: 0 });
+            const courses = await CourseDB.Courses.find({}, { __v: 0 });
             res.json(courses);
         } catch (error) {
             console.log("[CourseDB Error] endpoint_getCourseList failed to fetch course list", error);
@@ -202,7 +208,7 @@ class CourseDB {
     async endpoint_getCourseByName(req, res) {
         try {
             const { courseName } = req.params;
-            
+
             if (!courseName) {
                 res.json({ error: "Course name is required" });
                 return;
@@ -217,7 +223,7 @@ class CourseDB {
 
             res.json(course);
         } catch (error) {
-            console.log("[CourseDB Error] endpoint_getCourse failed to fetch course", error);
+            console.log("[CourseDB Error] endpoint_getCourseByName failed to fetch course", error);
             res.json({ error: "Internal server error" });
         }
     }
@@ -227,7 +233,7 @@ class CourseDB {
             const { courseId } = req.params;
 
             if (!courseId) {
-                res.json({ error: "Course name is required" });
+                res.json({ error: "Course ID is required" });
                 return;
             }
 
@@ -240,7 +246,7 @@ class CourseDB {
 
             res.json(course);
         } catch (error) {
-            console.log("[CourseDB Error] endpoint_getCourse failed to fetch course", error);
+            console.log("[CourseDB Error] endpoint_getCourseById failed to fetch course", error);
             res.json({ error: "Internal server error" });
         }
     }

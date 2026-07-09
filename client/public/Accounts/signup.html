@@ -33,7 +33,7 @@
         try {
             await Clerk.load()
             Clerk.mountSignUp(document.getElementById("signupDiv"), {
-                redirectUrl: window.location.origin + ""
+                redirectUrl: window.location.origin + "/private/Dashboard/dashboard.html"
             });
         } catch (error) {
             console.error("Clerk failed to load:", error);

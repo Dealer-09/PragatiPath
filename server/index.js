@@ -49,7 +49,7 @@ app.get('/private/logout', async (req, res) => {
         res.json({ error: "No session ID found" });
         return;
     }
-        
+
     try {
         await clerk.clerkClient.sessions.revokeSession(sessionId);
         res.redirect('/public/Accounts/signin.html');
@@ -59,7 +59,7 @@ app.get('/private/logout', async (req, res) => {
 });
 
 app.get('/api/userinfo', clerk.requireAuth(), userDBHandler.endpoint_userInfo.bind(userDBHandler));
-// app.post('/api/updcourseprog', clerk.requireAuth(), express.json(), userDBHandler.endpoint_updateCourseProgress.bind(userDBHandler));
+app.post('/api/updcourseprog', clerk.requireAuth(), express.json(), userDBHandler.endpoint_updateCourseProgress.bind(userDBHandler));
 
 app.get('/api/getcourses', clerk.requireAuth(), courseDBHandler.endpoint_getCourseList.bind(courseDBHandler));
 app.get('/api/getcourse/name/:courseName', clerk.requireAuth(), courseDBHandler.endpoint_getCourseByName.bind(courseDBHandler));
@@ -68,7 +68,7 @@ app.get('/api/getcourse/id/:courseId', clerk.requireAuth(), courseDBHandler.endp
 app.post('/api/addcourse', express.json(), userDBHandler.endpoint_addCourse.bind(userDBHandler));
 app.post('/api/removecourse', express.json(), userDBHandler.endpoint_removeCourse.bind(userDBHandler));
 
-// app.get('/api/gemini/youtube', endpoint_geminiYoutubeSearch);
+app.get('/api/gemini/youtube', endpoint_geminiYoutubeSearch);
 app.post('/api/gemini/chat', express.json(), GeminiChatBot.endpoint_chatbot);
 
 app.get('/api/openweather/:lat/:lon', endpoint_openWeatherAPI);

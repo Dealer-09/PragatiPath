@@ -6,3 +6,6 @@ node_modules/
 
 # Ignore any editor config files
 .vscode/
+
+# npm lockfile (using bun instead)
+package-lock.json
