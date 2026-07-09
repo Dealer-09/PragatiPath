@@ -113,11 +113,17 @@
   align-self: flex-end;
 }
 
-#chat-wrapper .assistant-message {
+#chat-wrapper .assistant-message,
+#chat-wrapper .bot-message {
   background: rgba(30, 34, 82, 0.75);
   color: white;
   align-self: flex-start;
   box-shadow: 0 0 10px var(--chat-glow-color);
+  padding: 10px;
+  margin: 5px;
+  border-radius: 15px;
+  max-width: 80%;
+  font-size: 0.94rem;
 }
 
 #input-container {

@@ -256,25 +256,48 @@ window.addEventListener('load', async () => {
         const req = await fetch('/api/userinfo');
         const res = await req.json();
         userData = res;
-        
-        document.getElementById("username").innerText = userData.fullName;
-        document.getElementById("profilePic").innerHTML = `<img src="${userData.imgUrl}" alt="Profile Picture" />`;
+
+        // fullName may be empty for older accounts, fall back to name
+        document.getElementById("username").innerText = userData.fullName || userData.name || "Farmer";
+        if (userData.imgUrl) {
+            document.getElementById("profilePic").innerHTML = `<img src="${userData.imgUrl}" alt="Profile Picture" />`;
+        }
 
         const mycoursesContainer = document.querySelector('.course-cards-container');
-        let i = 0;
-        for (const courseName of userData.enrolledCourses) {
-            if (i++ > 3) { // show only first 3
-                break;
-            }
+        const enrolledCourses = userData.enrolledCourses || [];
+
+        if (enrolledCourses.length === 0) {
+            mycoursesContainer.innerHTML = '<p style="color:#888">No courses enrolled yet. Browse courses below!</p>';
+        }
+
+        let shown = 0;
+        for (const enrollment of enrolledCourses) {
+            if (shown++ >= 3) break; // show only first 3
+
+            // enrolledCourses is now [{name, progress}] objects
+            const courseName = typeof enrollment === 'object' ? enrollment.name : enrollment;
+            const progress = typeof enrollment === 'object' ? enrollment.progress : 0;
 
             const courseRes = await fetch(`/api/getcourse/name/${courseName}`);
             const courseData = await courseRes.json();
+            if (courseData.error) continue;
+
             const imgRes = await fetch(window.location.origin + `/api/youtubethumb/${courseData.playlist}`);
             const imgData = await imgRes.json();
 
             const courseCard = document.createElement('div');
             courseCard.classList.add('dashboard-course-card');
-            courseCard.innerHTML = `<img src="${imgData.img}" alt="Playlist image" /> <h2>${courseName}</h2><p>${courseData.description}</p><button onclick="courseShortHandler(this);" data-coursename="${courseName}" data-courseplaylist="${courseData.playlist}" data-courseid="${courseData._id}">Watch</button><button onclick="unenrollCourse(this);" data-coursename="${courseName}">Unenroll</button>`;
+            courseCard.innerHTML = `
+                <img src="${imgData.img || ''}" alt="${courseName}" />
+                <h2>${courseName}</h2>
+                <p>${courseData.description}</p>
+                <div class="course-progress">
+                    <div class="course-progress-bar" style="width:${Math.min(progress, 100)}%"></div>
+                </div>
+                <span class="progress-label">${Math.min(Math.round(progress), 100)}% complete</span>
+                <button onclick="courseShortHandler(this);" data-coursename="${courseName}" data-courseplaylist="${courseData.playlist}" data-courseid="${courseData._id}">▶ Watch</button>
+                <button onclick="unenrollCourse(this);" data-coursename="${courseName}">Unenroll</button>
+            `;
             mycoursesContainer.appendChild(courseCard);
         }
     } catch (error) {
@@ -538,18 +561,28 @@ async function logout() {
 async function listCourses() {
     const res = await fetch('/api/getcourses');
     const data = await res.json();
+    if (data.error) return;
     const courseList = document.querySelector('.courses-grid');
+    courseList.innerHTML = '';
+
     for (const course of data) {
         const card = document.createElement('div');
         card.classList.add('course-card');
-        const imgres = await fetch(window.location.origin + `/api/youtubethumb/${course.playlist}`);
-        const imgdata = await imgres.json();
+
+        // fetch thumbnail (YouTube API) — gracefully degrade if unavailable
+        let imgSrc = '';
+        try {
+            const imgres = await fetch(window.location.origin + `/api/youtubethumb/${course.playlist}`);
+            const imgdata = await imgres.json();
+            imgSrc = imgdata.img || '';
+        } catch (_) {}
+
         card.innerHTML = `
-            <img src="${imgdata.img}" alt="Playlist image" />
+            ${imgSrc ? `<img src="${imgSrc}" alt="${course.name}" />` : '<div class="no-thumb">📚</div>'}
             <h3>${course.name}</h3>
             <p>${course.description}</p>
-            <p><b>Medium</b>: ${course.medium}</p>
-            <button class="enroll-btn" data-coursename="${course.name}" data-courseplaylist="${course.playlist}" data-courseid="${course._id}" onclick="courseHandler(this);">Watch</button>
+            <p><b>Medium</b>: ${course.medium || 'Hindi'}</p>
+            <button class="enroll-btn" data-coursename="${course.name}" data-courseplaylist="${course.playlist}" data-courseid="${course._id}" onclick="courseHandler(this);">▶ Watch</button>
         `;
         courseList.appendChild(card);
     }
@@ -562,19 +595,16 @@ async function courseHandler(button) {
     localStorage.setItem('coursePlaylist', button.dataset.courseplaylist);
     localStorage.setItem('courseId', button.dataset.courseid);
 
-    const res = await fetch('/api/addcourse', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-            courseName: button.dataset.coursename
-        })
-    });
-
-    const data = await res.json();
-    if (data.error) {
-        console.error("Error adding course:", data.error);
+    try {
+        const res = await fetch('/api/addcourse', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ courseName: button.dataset.coursename })
+        });
+        const data = await res.json();
+        if (data.error) console.warn("Enroll note:", data.error);
+    } catch (err) {
+        console.warn("Could not enroll:", err);
     }
 
     window.location.href = window.location.origin + '/private/Player/player.html';
