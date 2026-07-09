@@ -3,7 +3,7 @@ const crypto = require('crypto');
 const session = require('cookie-session');
 
 // custom modules ----------------
-const { MongooseConnect, UserDB, CourseDB } = require('./DBHandler.js');
+const { connectDB, UserDB, CourseDB } = require('./DBHandler.js');
 const { endpoint_getChannelInfo, endpoint_youtubePlaylistImg, endpoint_geminiYoutubeSearch, endpoint_openWeatherAPI, GeminiChatBot } = require('./aiSearch.js');
 
 // express ----------------------------
@@ -17,7 +17,7 @@ process.env.PORT = process.env.PORT || '8080';
 
 // session handler ----------------
 app.use(session({
-    secret: crypto.randomBytes(32),
+    secret: process.env.SESSION_SECRET || 'pragatipath-dev-secret',
     maxAge: 24 * 60 * 60 * 1000     // 24 hour expiry
 }));
 
@@ -26,7 +26,7 @@ const clerk = require('@clerk/express');
 app.use(clerk.clerkMiddleware());
 
 // database connection --------------
-MongooseConnect.connect(process.env.MONGO_URI);
+connectDB(process.env.MONGO_URI);
 
 const userDBHandler = new UserDB();
 const courseDBHandler = new CourseDB();

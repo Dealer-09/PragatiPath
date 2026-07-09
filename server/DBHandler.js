@@ -1,20 +1,9 @@
 const mongoose = require('mongoose');
 const clerk = require('@clerk/express');
 
-class MongooseConnect {
-    static isConnected = false;
-
-    static async connect(URI, force = false) {
-        if (force) {
-            MongooseConnect.isConnected = false;
-        }
-
-        if (!MongooseConnect.isConnected) {
-            await mongoose.connect(URI);
-            MongooseConnect.isConnected = true;
-            console.log("[MongooseConnect INFO] Successfully connected to MongoDB!");
-        }
-    }
+async function connectDB(URI) {
+    await mongoose.connect(URI);
+    console.log('[DB] Connected to MongoDB');
 }
 
 class UserDB {
@@ -253,7 +242,7 @@ class CourseDB {
 }
 
 module.exports = {
-    MongooseConnect,
+    connectDB,
     UserDB,
     CourseDB
 };
