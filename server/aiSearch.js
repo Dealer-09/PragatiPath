@@ -8,18 +8,16 @@ dotenv.config();
 const ai = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
 async function endpoint_geminiYoutubeSearch(req, res) {
-    const query = req.params.query;
+    const query = req.query.q;
 
     if (!query) {
-        res.json({ error: "Query parameter is required." });
+        res.json({ error: "Query parameter ?q= is required." });
         return;
     }
 
     const model = ai.getGenerativeModel({ model: 'gemini-2.5-flash' });
 
     const result = await model.generateContent(`List out the top 5 relevant youtube videos for the query "${query}" in a JSON format. The JSON should contain the title.`);
-
-    console.log(result, result.response);
 
     res.send(result.response.text());
 }

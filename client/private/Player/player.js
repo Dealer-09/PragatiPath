@@ -1,8 +1,10 @@
 let player;
 let watchSeconds = 0;
 let timer = null;
-const PROGRESS_REPORT_INTERVAL = 30; // send progress to server every 30 seconds
+const COURSE_DURATION_SECS = 1200; // 20 min = 100% complete
+const PROGRESS_REPORT_INTERVAL = 30; // sync to server every 30s
 let lastReportedSeconds = 0;
+let userName = 'Student'; // will be overwritten by real name on load
 
 async function fetchCourseData() {
     const name = localStorage.getItem('courseName');
@@ -55,7 +57,7 @@ function checkCertificateEligibility(courseName) {
         certBtn.className = "cert-btn";
         certBtn.style.marginTop = "1rem";
         certBtn.onclick = () => {
-            localStorage.setItem("cert_name", "Student"); // actual name from user profile could be set here
+            localStorage.setItem("cert_name", userName);
             localStorage.setItem("cert_course", courseName);
             localStorage.setItem("cert_date", new Date().toLocaleDateString());
             window.location.href = "../Certificate Generator/cert.html";
@@ -64,10 +66,13 @@ function checkCertificateEligibility(courseName) {
     }
 }
 
-// Send accumulated progress to server
-async function reportProgress(seconds) {
+// Send accumulated progress to server as a PERCENTAGE increment
+async function reportProgress(deltaSeconds) {
     const courseName = localStorage.getItem('courseName');
-    if (!courseName || seconds <= 0) return;
+    if (!courseName || deltaSeconds <= 0) return;
+
+    // Convert seconds watched → percentage of estimated total duration
+    const percentIncrement = (deltaSeconds / COURSE_DURATION_SECS) * 100;
 
     try {
         await fetch('/api/updcourseprog', {
@@ -75,7 +80,7 @@ async function reportProgress(seconds) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 courseName,
-                progress: seconds   // server adds this to existing progress
+                progress: percentIncrement
             })
         });
     } catch (err) {
@@ -128,12 +133,20 @@ const ytScript = document.createElement('script');
 ytScript.src = "https://www.youtube.com/iframe_api";
 document.head.appendChild(ytScript);
 
-// Load watched seconds from localStorage on startup
-window.addEventListener('load', () => {
+// Load user name + course data on page load
+window.addEventListener('load', async () => {
     const courseId = localStorage.getItem("courseId");
     if (courseId) {
         watchSeconds = parseInt(localStorage.getItem(`watched_${courseId}`)) || 0;
         lastReportedSeconds = watchSeconds;
     }
+
+    // Fetch real user name for certificate
+    try {
+        const res = await fetch('/api/userinfo');
+        const data = await res.json();
+        userName = data.fullName || data.name || 'Student';
+    } catch (_) {}
+
     fetchCourseData();
 });

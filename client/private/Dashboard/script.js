@@ -350,6 +350,11 @@ function showSection(targetId) {
         section.style.display = 'none';
     });
     document.getElementById(targetId).style.display = 'block';
+
+    // Lazy-init the Leaflet map the first time ai-toolkit section is shown
+    if (targetId === 'ai-toolkit') {
+        getLocationAndStart();
+    }
 }
 
 const navLinks = document.querySelectorAll('.nav-anchor');
@@ -380,7 +385,7 @@ async function loadModel() {
 
     model = await tf.loadLayersModel(
         window.location.origin + '/public/assets/plant-disease-tfjs-default-v1/model.json',
-        { fromTFHub: true }
+        { fromTFHub: false }
     );
     console.log("Model loaded successfully!");
 }
@@ -506,7 +511,25 @@ function getFarmingSuggestion(weatherData) {
     }
     return "Weather looks normal. Continue regular farming practices.";
 }
-getLocationAndStart();
+// Map is lazy-initialized only when ai-toolkit section is shown
+// (Leaflet can't render in a hidden element)
+let mapInitialized = false;
+function getLocationAndStart() {
+    if (mapInitialized) return;
+    if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(position => {
+            const lat = position.coords.latitude;
+            const lon = position.coords.longitude;
+            mapInitialized = true;
+            initMap(lat, lon);
+            getWeatherByCoords(lat, lon);
+        }, () => {
+            weatherDiv.innerHTML = '<p>Unable to fetch location. Allow location access.</p>';
+        });
+    } else {
+        weatherDiv.innerHTML = '<p>Geolocation not supported by this browser.</p>';
+    }
+}
 
 // Email Validation and Sending
 //   email 
