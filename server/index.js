@@ -70,6 +70,45 @@ app.post('/api/removecourse', clerk.requireAuth(), express.json(), userDBHandler
 
 app.get('/api/gemini/youtube', endpoint_geminiYoutubeSearch);
 app.post('/api/gemini/chat', express.json(), GeminiChatBot.endpoint_chatbot);
+app.post('/api/gemini/analyze-plant', express.json(), async (req, res) => {
+    const { GoogleGenerativeAI } = require('@google/generative-ai');
+    const key = req.headers['x-gemini-key'];
+    if (!key) return res.status(400).json({ error: 'No Gemini API key provided.' });
+
+    const { imageBase64, mimeType = 'image/jpeg' } = req.body;
+    if (!imageBase64) return res.status(400).json({ error: 'No image provided.' });
+
+    try {
+        const ai = new GoogleGenerativeAI(key);
+        const model = ai.getGenerativeModel({ model: 'gemini-2.5-flash' });
+        const result = await model.generateContent([
+            {
+                inlineData: { data: imageBase64, mimeType }
+            },
+            `You are an expert agricultural plant pathologist. Analyze this leaf image.
+Respond ONLY with a valid JSON object, no markdown, no explanation. Use this exact schema:
+{
+  "crop": "common crop name or Unknown",
+  "disease": "disease name or Healthy or Unknown",
+  "severity": "None|Low|Medium|High",
+  "confidence": "Low|Medium|High",
+  "isHealthy": true or false,
+  "treatment": "1-2 sentence actionable treatment advice",
+  "prevention": "1 sentence prevention tip"
+}
+If the image is not a plant leaf, set crop and disease to "Not a plant leaf" and confidence to "Low".`
+        ]);
+
+        let text = result.response.text().trim();
+        // Strip markdown code fences if model wraps in them
+        text = text.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```$/i, '');
+        const parsed = JSON.parse(text);
+        res.json(parsed);
+    } catch (err) {
+        // If JSON parse failed, return raw text for debugging
+        res.status(500).json({ error: err.message });
+    }
+});
 
 app.get('/api/openweather/:lat/:lon', endpoint_openWeatherAPI);
 

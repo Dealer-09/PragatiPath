@@ -256,11 +256,22 @@
                 <p>Empowering farmers with smart tools</p>
             </div>
             <div class="ai-toolkit-container">
-                <div class="card">
-                    <h2>Plant Disease Detection</h2>
-                    <input type="file" id="upload" class="file-input">
-                    <img id="image" width="224" height="224" alt="Uploaded Image" />
-                    <div id="prediction">Prediction will appear here</div>
+                <div class="card" id="plant-card">
+                    <div class="plant-card-header">
+                        <h2>🌿 Plant Disease Detection</h2>
+                        <span id="plant-mode-badge" class="plant-mode-badge"></span>
+                    </div>
+                    <div class="plant-upload-row">
+                        <label class="plant-upload-btn" for="upload">📁 Choose Image</label>
+                        <label class="plant-upload-btn plant-camera-btn" for="upload-camera">📷 Take Photo</label>
+                        <input type="file" id="upload" accept="image/*" style="display:none">
+                        <input type="file" id="upload-camera" accept="image/*" capture="environment" style="display:none">
+                    </div>
+                    <img id="image" alt="Leaf preview" style="display:none; width:100%; max-width:280px; border-radius:12px; margin:10px auto; display:block;">
+                    <div id="plant-spinner" style="display:none; text-align:center; padding:14px;">
+                        <span class="plant-spinner-icon">🔍</span> Analysing...
+                    </div>
+                    <div id="prediction"></div>
                 </div>
 
                 <div class="card">

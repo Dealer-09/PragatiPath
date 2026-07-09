@@ -825,6 +825,116 @@ button:hover {
     color: #4CAF50;
 }
 
+/* ── Plant Disease Detection Card ── */
+.plant-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+.plant-card-header h2 { margin: 0; }
+
+.plant-mode-badge {
+    font-size: 0.75rem;
+    font-weight: 700;
+    padding: 3px 10px;
+    border-radius: 20px;
+    white-space: nowrap;
+}
+.plant-mode-badge.gemini {
+    background: linear-gradient(135deg, #4285f4, #34a853);
+    color: #fff;
+}
+.plant-mode-badge.offline {
+    background: #e0e0e0;
+    color: #555;
+}
+
+.plant-upload-row {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 12px;
+}
+.plant-upload-btn {
+    flex: 1;
+    min-width: 120px;
+    padding: 9px 14px;
+    background: #f0f4f8;
+    border: 1.5px dashed #bbb;
+    border-radius: 10px;
+    cursor: pointer;
+    text-align: center;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: #444;
+    transition: background 0.2s, border-color 0.2s;
+}
+.plant-upload-btn:hover { background: #e3f2fd; border-color: #4CAF50; }
+.plant-camera-btn { border-color: #4285f4; }
+.plant-camera-btn:hover { background: #e8f0fe; }
+
+@keyframes plant-pulse {
+    0%, 100% { transform: scale(1); }
+    50%       { transform: scale(1.15); }
+}
+.plant-spinner-icon {
+    display: inline-block;
+    animation: plant-pulse 1s ease-in-out infinite;
+    font-size: 1.3rem;
+}
+
+.plant-result {
+    background: #f9fbff;
+    border: 1px solid #e0e8f0;
+    border-radius: 12px;
+    padding: 14px 16px;
+    margin-top: 10px;
+    font-size: 0.88rem;
+}
+.plant-result-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 5px 0;
+    border-bottom: 1px solid #eef2f7;
+}
+.plant-result-row:last-of-type { border-bottom: none; }
+.plant-label {
+    color: #666;
+    font-weight: 600;
+    font-size: 0.82rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+.plant-value { color: #222; font-weight: 500; text-align: right; }
+.plant-severity-badge {
+    color: #fff;
+    font-weight: 700;
+    font-size: 0.78rem;
+    padding: 2px 10px;
+    border-radius: 12px;
+    letter-spacing: 0.04em;
+}
+.plant-result-section {
+    margin-top: 10px;
+    padding-top: 8px;
+    border-top: 1px solid #e4eaf2;
+    font-size: 0.85rem;
+    line-height: 1.5;
+    color: #333;
+}
+.plant-result-section strong { display: block; margin-bottom: 4px; color: #191923; }
+.plant-result-section p { margin: 0; }
+.plant-result-source {
+    margin-top: 10px;
+    font-size: 0.75rem;
+    color: #aaa;
+    text-align: right;
+    font-style: italic;
+}
 .course-search-bar {
     display: flex;
     justify-content: center;
