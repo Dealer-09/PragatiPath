@@ -65,8 +65,8 @@ app.get('/api/getcourses', clerk.requireAuth(), courseDBHandler.endpoint_getCour
 app.get('/api/getcourse/name/:courseName', clerk.requireAuth(), courseDBHandler.endpoint_getCourseByName.bind(courseDBHandler));
 app.get('/api/getcourse/id/:courseId', clerk.requireAuth(), courseDBHandler.endpoint_getCourseById.bind(courseDBHandler));
 
-app.post('/api/addcourse', express.json(), userDBHandler.endpoint_addCourse.bind(userDBHandler));
-app.post('/api/removecourse', express.json(), userDBHandler.endpoint_removeCourse.bind(userDBHandler));
+app.post('/api/addcourse', clerk.requireAuth(), express.json(), userDBHandler.endpoint_addCourse.bind(userDBHandler));
+app.post('/api/removecourse', clerk.requireAuth(), express.json(), userDBHandler.endpoint_removeCourse.bind(userDBHandler));
 
 app.get('/api/gemini/youtube', endpoint_geminiYoutubeSearch);
 app.post('/api/gemini/chat', express.json(), GeminiChatBot.endpoint_chatbot);
