@@ -27,20 +27,6 @@ function updateKeyStatusDot() {
     }
 }
 
-function openKeyModal() {
-    document.getElementById('key-modal-overlay').style.display = 'block';
-    document.getElementById('key-modal').style.display = 'flex';
-    const input = document.getElementById('key-input');
-    input.value = getGeminiKey();
-    document.getElementById('key-modal-status').textContent = '';
-    setTimeout(() => input.focus(), 50);
-}
-
-function closeKeyModal() {
-    document.getElementById('key-modal-overlay').style.display = 'none';
-    document.getElementById('key-modal').style.display = 'none';
-}
-
 function saveGeminiKey() {
     const val = document.getElementById('key-input').value.trim();
     if (!val) {
@@ -52,15 +38,18 @@ function saveGeminiKey() {
     updateKeyStatusDot();
     document.getElementById('key-modal-status').style.color = '#4CAF50';
     document.getElementById('key-modal-status').textContent = '✅ Key saved!';
-    setTimeout(closeKeyModal, 900);
+    setTimeout(() => {
+        document.getElementById('key-modal').close();
+        document.getElementById('key-modal-status').textContent = '';
+    }, 900);
 }
 
 function clearGeminiKey() {
     localStorage.removeItem('gemini_api_key');
     document.getElementById('key-input').value = '';
-    updateKeyStatusDot();
-    document.getElementById('key-modal-status').style.color = '#c00';
+    document.getElementById('key-modal-status').style.color = '#666';
     document.getElementById('key-modal-status').textContent = 'Key cleared.';
+    updateKeyStatusDot();
 }
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -205,18 +194,18 @@ function renderNotes(notes) {
     notes.forEach((note, index) => {
         const noteElement = document.createElement('div');
         noteElement.className = 'note-item';
-        noteElement.innerHTML = `
-            <span class="note-text">${note}</span>
-            <button class="delete-note" data-index="${index}">×</button>
-        `;
+        // Use textContent to prevent XSS from user-supplied note content
+        const span = document.createElement('span');
+        span.className = 'note-text';
+        span.textContent = note;
+        const btn = document.createElement('button');
+        btn.className = 'delete-note';
+        btn.textContent = '×';
+        btn.dataset.index = index;
+        btn.addEventListener('click', () => deleteNote(index));
+        noteElement.appendChild(span);
+        noteElement.appendChild(btn);
         notesList.appendChild(noteElement);
-    });
-
-    document.querySelectorAll('.delete-note').forEach(button => {
-        button.addEventListener('click', (e) => {
-            const index = parseInt(e.target.getAttribute('data-index'));
-            deleteNote(index);
-        });
     });
 }
 
@@ -243,13 +232,23 @@ function setupChat() {
     const sendButton = document.getElementById('send-button');
     const chatBox = document.getElementById('chat-box');
 
+    // Sanitise helper — use DOMPurify if available, else strip tags as fallback
+    function safeMarkdown(text) {
+        const html = marked.parse(text);
+        return (typeof DOMPurify !== 'undefined') ? DOMPurify.sanitize(html) : html;
+    }
+
     function addMessage(message, isUser) {
         const messageDiv = document.createElement('div');
         messageDiv.classList.add(isUser ? 'user-message' : 'bot-message');
-        messageDiv.innerHTML = marked.parse(message);
+        // User messages shown as plain text; bot responses sanitised markdown
+        if (isUser) {
+            messageDiv.textContent = message;
+        } else {
+            messageDiv.innerHTML = safeMarkdown(message);
+        }
         chatBox.appendChild(messageDiv);
         chatBox.scrollTop = chatBox.scrollHeight;
-
         return messageDiv;
     }
 
@@ -259,22 +258,25 @@ function setupChat() {
 
         addMessage(message, true);
         chatInput.value = '';
-        
-        const msgDiv = addMessage("...", false);
-        const res = await fetch('/api/gemini/chat', {
-            method: 'POST',
-            headers: geminiHeaders(),
-            body: JSON.stringify({ query: message })
-        });
+        const msgDiv = addMessage('...', false);
 
-        const data = await res.json();
-        if (data.error) {
-            const errMsg = data.error.includes('No Gemini API key')
-                ? 'No API key set. Click 🔑 API Key in the header to add yours.'
-                : 'Error: ' + data.error;
-            msgDiv.innerHTML = errMsg;
-        } else {
-            msgDiv.innerHTML = marked.parse(data.response);
+        try {
+            const res  = await fetch('/api/gemini/chat', {
+                method: 'POST',
+                headers: geminiHeaders(),
+                body: JSON.stringify({ query: message })
+            });
+            const data = await res.json();
+            if (data.error) {
+                const errMsg = data.error.includes('No Gemini API key')
+                    ? 'No API key set. Click 🔑 API Key in the header to add yours.'
+                    : 'Error: ' + data.error;
+                msgDiv.textContent = errMsg;
+            } else {
+                msgDiv.innerHTML = safeMarkdown(data.response);
+            }
+        } catch (err) {
+            msgDiv.textContent = 'Network error — check your connection and try again.';
         }
     }
 
@@ -502,7 +504,7 @@ function renderGeminiResult(data) {
         </div>`;
 }
 
-function renderOfflineResult(top5) {
+function renderOfflineResult(top5, backend, inferMs) {
     if (!top5 || top5.length === 0) {
         predictionText.innerHTML = `<div class="plant-result"><p style="color:#888">Could not identify the plant. Try a clearer close-up of a single leaf.</p></div>`;
         return;
@@ -567,7 +569,7 @@ function renderOfflineResult(top5) {
                 <span class="plant-value">${confidence}%</span>
             </div>
             ${altRows ? `<div class="plant-result-section"><strong>Other possibilities</strong><p>${altRows}</p></div>` : ''}
-            <p class="plant-result-source">Offline ViT-tiny · Corn / Potato / Rice / Wheat · Set a Gemini key for any crop + treatment advice</p>
+            <p class="plant-result-source">${{'litert-webgpu':'⚡ LiteRT WebGPU','litert-wasm':'🔵 LiteRT WASM','ort':'🟡 onnxruntime-web'}[backend] || backend} · ${inferMs}ms · Corn/Potato/Rice/Wheat · Set a Gemini key for any crop</p>
         </div>`;
 }
 
@@ -611,10 +613,10 @@ async function analyzeImage(file) {
                 else plantImg.onload = resolve;
             });
 
-            const top5 = await PlantViT.predict(plantImg, (msg) => {
+            const { top5, backend, inferMs } = await PlantViT.predict(plantImg, (msg) => {
                 predictionText.innerHTML = `<p style="color:#888">⏳ ${msg}</p>`;
             });
-            renderOfflineResult(top5);
+            renderOfflineResult(top5, backend, inferMs);
         } catch (err) {
             predictionText.innerHTML = `<p style="color:#c00">❌ Offline model error: ${err.message}</p>`;
         }
@@ -627,99 +629,91 @@ plantUpload.addEventListener('change', (e) => analyzeImage(e.target.files[0]));
 plantUploadCamera.addEventListener('change', (e) => analyzeImage(e.target.files[0]));
 
 const weatherDiv = document.getElementById('weatherResult');
+let _lastWeatherData = null; // store for farming tips refresh
 
-
-
-
-
-// Weather by coordinates (for location-based fetch)
+// Weather by coordinates — fetches data then calls farming tips
 async function getWeatherByCoords(lat, lon) {
+    weatherDiv.innerHTML = '<p style="color:#888">⏳ Fetching weather...</p>';
     try {
         const wres = await fetch(window.location.origin + `/api/openweather/${lat}/${lon}`);
         const data = await wres.json();
-        weatherDiv.innerHTML =
-            `<p><strong>${data.name}</strong></p>
-            <p>Temperature: ${data.temp}°C</p>
-            <p>Weather: ${data.weather}</p>
-            <p>Humidity: ${data.humidity}%</p>
-            <p>Wind Speed: ${data.wind} m/s</p>`;
-        //Farming Suggestions
-        const farmingSuggestion = getFarmingSuggestion(data);
-        weatherDiv.innerHTML += `<p style="color: green;"><strong>Farming Tip:</strong> ${farmingSuggestion}</p>`;
+        _lastWeatherData = { ...data, lat, lon };
 
+        weatherDiv.innerHTML = `
+            <p><strong>${data.name}</strong></p>
+            <p>🌡️ Temperature: <strong>${data.temp}°C</strong></p>
+            <p>🌤️ Weather: ${data.weather}</p>
+            <p>💧 Humidity: ${data.humidity}%</p>
+            <p>💨 Wind: ${data.wind} m/s</p>
+            <div id="farming-tips-box"><p style="color:#888;font-size:0.85rem">⏳ Loading farming tips...</p></div>`;
+
+        fetchFarmingTips(data);
     } catch (error) {
-        console.log(error);
+        console.error(error);
         weatherDiv.innerHTML = '<p>Weather data not available!</p>';
     }
 }
 
-function getWeather() {
-    if (navigator.geolocation) {
-        navigator.geolocation.getCurrentPosition(position => {
-            const lat = position.coords.latitude;
-            const lon = position.coords.longitude;
-            console.log(`Your location: ${lat}, ${lon}`);
-            getWeatherByCoords(lat, lon);
-        }, () => {
-            alert("Unable to fetch location. Allow location access.");
-        });
-    } else {
-        alert("Geolocation is not supported by this browser.");
+// Gemini-powered farming tips (falls back to static rules if no key)
+async function fetchFarmingTips(data) {
+    const tipsBox = document.getElementById('farming-tips-box');
+    if (!tipsBox) return;
+
+    const key = getGeminiKey();
+    if (!key) {
+        // Static fallback
+        const tip = staticFarmingTip(data);
+        tipsBox.innerHTML = `<p style="color:green"><strong>🌱 Farming Tip:</strong> ${tip}</p>
+            <p style="font-size:0.75rem;color:#aaa">Set a Gemini API key for AI-powered tips</p>`;
+        return;
     }
+
+    try {
+        const res = await fetch('/api/gemini/farming-tips', {
+            method: 'POST',
+            headers: geminiHeaders(),
+            body: JSON.stringify({
+                temp: data.temp, humidity: data.humidity,
+                weather: data.weather, location: data.name
+            })
+        });
+        const json = await res.json();
+        if (json.error) throw new Error(json.error);
+
+        const tips = json.tips;
+        tipsBox.innerHTML = `
+            <div style="margin-top:10px">
+                <strong style="color:#2e7d32">🌱 AI Farming Tips for ${data.name}:</strong>
+                <ol style="margin:6px 0 0 16px;padding:0;color:#333;font-size:0.9rem">
+                    ${tips.map(t => `<li style="margin-bottom:4px">${t}</li>`).join('')}
+                </ol>
+                <p style="font-size:0.7rem;color:#aaa;margin-top:4px">Powered by Gemini · Tap refresh to update</p>
+            </div>`;
+    } catch (err) {
+        tipsBox.innerHTML = `<p style="color:green"><strong>🌱 Farming Tip:</strong> ${staticFarmingTip(data)}</p>`;
+    }
+}
+
+function staticFarmingTip(data) {
+    const { temp, humidity, weather = '' } = data;
+    const w = weather.toLowerCase();
+    if (temp > 32 && humidity < 40) return 'Consider drought-resistant crops like millet, sorghum, or chickpeas.';
+    if (humidity > 75)              return 'High humidity detected. Monitor for fungal infections and use proper fungicides.';
+    if (w.includes('rain'))         return 'Rains expected — ensure proper water drainage in your fields.';
+    if (temp >= 20 && temp <= 25)   return 'Ideal conditions for tomatoes, peppers, and leafy vegetables.';
+    return 'Weather looks normal. Continue regular farming practices.';
 }
 
 // Map Initialization
 function initMap(lat, lon) {
-    const map = L.map('map', {
-        zoomControl: true
-    }).setView([lat, lon], 10);
-
-    // L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    const map = L.map('map', { zoomControl: true }).setView([lat, lon], 10);
     L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
         attribution: 'Map data © OpenStreetMap contributors, SRTM | Map style: © OpenTopoMap (CC-BY-SA)',
         keepBuffer: 8,
     }).addTo(map);
-
-    L.marker([lat, lon]).addTo(map)
-        .bindPopup('You are here!')
-        .openPopup();
+    L.marker([lat, lon]).addTo(map).bindPopup('You are here!').openPopup();
 }
 
-// Get Location and Start Map + Weather
-function getLocationAndStart() {
-    if (navigator.geolocation) {
-        navigator.geolocation.getCurrentPosition(position => {
-            const lat = position.coords.latitude;
-            const lon = position.coords.longitude;
-            console.log(`Your location: ${lat}, ${lon}`);
-            initMap(lat, lon);
-            getWeatherByCoords(lat, lon);
-        }, () => {
-            alert("Unable to fetch location. Allow location access.");
-        });
-    } else {
-        alert("Geolocation is not supported by this browser.");
-    }
-}
-function getFarmingSuggestion(weatherData) {
-    const temp = weatherData.temp;
-    const humidity = weatherData.humidity;
-    const mainWeather = weatherData.weather.toLowerCase();
-
-    if (temp > 32 && humidity < 40) {
-        return "Consider drought-resistant crops like millet, sorghum, or chickpeas.";
-    }
-    if (humidity > 75) {
-        return "High humidity detected. Monitor for fungal infections and use proper fungicides.";
-    }
-    if (mainWeather.includes("rain")) {
-        return "Heavy rains expected. Ensure proper water drainage in fields.";
-    }
-    if (temp >= 20 && temp <= 25) {
-        return "Ideal conditions for planting vegetables like tomatoes, peppers, and lettuce.";
-    }
-    return "Weather looks normal. Continue regular farming practices.";
-}
 // Map is lazy-initialized only when ai-toolkit section is shown
 // (Leaflet can't render in a hidden element)
 let mapInitialized = false;
@@ -733,39 +727,92 @@ function getLocationAndStart() {
             initMap(lat, lon);
             getWeatherByCoords(lat, lon);
         }, () => {
-            weatherDiv.innerHTML = '<p>Unable to fetch location. Allow location access.</p>';
+            weatherDiv.innerHTML = '<p>Unable to fetch location. Please allow location access.</p>';
         });
     } else {
         weatherDiv.innerHTML = '<p>Geolocation not supported by this browser.</p>';
     }
 }
 
+// "Get Weather" button — re-fetches without reinitialising the map
+function getWeather() {
+    if (_lastWeatherData) {
+        fetchFarmingTips(_lastWeatherData);
+    } else {
+        getLocationAndStart();
+    }
+}
+
+// ── YouTube Search (Gemini-powered) ──────────────────────────────────────────
+async function searchYouTube() {
+    const input   = document.getElementById('yt-search-input');
+    const results = document.getElementById('yt-results');
+    const query   = input?.value?.trim();
+    if (!query) return;
+
+    results.innerHTML = '<p style="color:#888;text-align:center">⏳ Searching...</p>';
+
+    try {
+        const res  = await fetch(`/api/gemini/youtube?q=${encodeURIComponent(query)}`, {
+            headers: geminiHeaders()
+        });
+        const data = await res.json();
+
+        if (data.error) {
+            results.innerHTML = `<p style="color:#c00">Error: ${data.error}</p>`;
+            return;
+        }
+
+        const videos = data.videos || data.results || data;
+        if (!Array.isArray(videos) || videos.length === 0) {
+            results.innerHTML = '<p style="color:#888">No results found.</p>';
+            return;
+        }
+
+        results.innerHTML = videos.map(v => `
+            <a class="yt-card" href="${v.url || v.link || '#'}" target="_blank" rel="noopener">
+                <img class="yt-thumb" src="${v.thumbnail || v.thumb || ''}" alt="${v.title || ''}"
+                     onerror="this.style.display='none'">
+                <div class="yt-card-info">
+                    <p class="yt-card-title">${v.title || 'Untitled'}</p>
+                    <p class="yt-card-channel">${v.channel || v.channelTitle || ''}</p>
+                </div>
+            </a>`).join('');
+    } catch (err) {
+        results.innerHTML = `<p style="color:#c00">Search failed: ${err.message}</p>`;
+    }
+}
+
+
 // Email Validation and Sending
 //   email 
-function validate(){
-    let name= document.querySelector(".name");
-    let email= document.querySelector(".email");
-    let msg= document.querySelector(".message");
-    let sendBtn= document.querySelector(".send-btn");
-    sendBtn.addEventListener('click',(e)=>{
+function validate() {
+    const name    = document.querySelector('.name');
+    const email   = document.querySelector('.email');
+    const msg     = document.querySelector('.message');
+    const sendBtn = document.querySelector('.send-btn');
+    if (!sendBtn) return; // guard: element may not exist on all pages
+    sendBtn.addEventListener('click', async (e) => {
         e.preventDefault();
-        if(name.value == "" || email.value == "" || msg.value== ""){
+        if (!name.value || !email.value || !msg.value) {
             emptyerror();
-        }else{
-            sendmail (name.value, email.value, msg.value);
-            success();
+        } else {
+            try {
+                await sendmail(name.value, email.value, msg.value);
+                success(); // only fires if emailjs.send resolves
+            } catch (err) {
+                swal({ title: 'Send Failed', text: 'Could not send email. Please try again.', icon: 'error' });
+            }
         }
     });
-
 }
 validate();
-function sendmail(name,email,msg)
-{
-    emailjs.send("service_zuh4atp","template_q2td4se",{
-        from_name: email,
-        to_name: name,
-        message: msg,
-        });
+function sendmail(name, email, msg) {
+    return emailjs.send('service_zuh4atp', 'template_q2td4se', {
+        from_name: name,   // sender's name
+        to_name:   email,  // sender's email (used as reply-to)
+        message:   msg,
+    });
 }
 function emptyerror()
 {
@@ -841,38 +888,4 @@ async function courseHandler(button) {
 
     window.location.href = window.location.origin + '/private/Player/player.html';
 }
-/*async function listCourses() {
-    const res = await fetch('/api/getcourses');
-    const data = await res.json();
-    const courseList = document.querySelector('.courses-grid');
-
-    for (const course of data) {
-        const card = document.createElement('div');
-        card.classList.add('course-card');
-
-        const imgres = await fetch(window.location.origin + `/api/youtubethumb/${course.playlist}`);
-        const imgdata = await imgres.json();
-
-        const watchedSeconds = localStorage.getItem(`watched_${course._id}`) || 0;
-        const estimatedDuration = 1200; 
-        const progress = Math.min(watchedSeconds / estimatedDuration, 1);
-
-        card.innerHTML = `
-            <div class="progress-bar">
-                <div class="progress-fill" style="width: ${progress * 100}%;"></div>
-            </div>
-            <img src="${imgdata.img}" alt="Playlist image" />
-            <h3>${course.name}</h3>
-            <p>${course.description}</p>
-            <p><b>Medium</b>: ${course.medium}</p>
-            <button class="enroll-btn"
-                data-coursename="${course.name}"
-                data-courseplaylist="${course.playlist}"
-                data-courseid="${course._id}"
-                onclick="courseHandler(this);">Watch</button>
-        `;
-
-        courseList.appendChild(card);
-    }
-}
-*/
+// Dead code removed — old listCourses() replaced by active version above

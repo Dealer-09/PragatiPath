@@ -1,11 +1,53 @@
-# Ignore node_modules
+# ── Dependencies ──────────────────────────────────────────────────────────────
 node_modules/
-
-# Ignore the environment keys
+scripts/
+# ── Environment & secrets ─────────────────────────────────────────────────────
 .env
+.env.local
+.env.*.local
 
-# Ignore any editor config files
+# ── Editor & OS ───────────────────────────────────────────────────────────────
 .vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
 
-# npm lockfile (using bun instead)
+# ── Lockfiles (using bun) ─────────────────────────────────────────────────────
 package-lock.json
+
+# ── ML model files — large binaries, not for git ─────────────────────────────
+# TFLite model (22 MB) — generate via scripts/colab_convert_to_tflite.py
+client/public/assets/plant-disease-vit/model.tflite
+
+# ONNX model (5.76 MB) — download via scripts/download_model.py or HuggingFace
+# Keep this tracked so the app works out-of-the-box (uncomment to ignore):
+# client/public/assets/plant-disease-vit/model_quantized.onnx
+
+# ── LiteRT WASM runtime — large binaries (~36 MB total), self-hosted ──────────
+# These are copied from node_modules/@litertjs/ — do NOT ignore, needed at runtime
+# If you want to ignore and serve from CDN instead, uncomment below:
+# client/public/assets/litert-wasm/*.wasm
+# client/public/assets/litert-wasm/*.js
+
+# ── Python artifacts ──────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+.Python
+venv/
+env/
+.venv/
+*.egg-info/
+dist/
+build/
+
+# ── Colab / notebook outputs ──────────────────────────────────────────────────
+*.ipynb_checkpoints/
+.ipynb_checkpoints/
+
+# ── Logs ─────────────────────────────────────────────────────────────────────
+*.log
+logs/
+npm-debug.log*
+bun-debug.log*

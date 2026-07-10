@@ -8,8 +8,17 @@ let userName = 'Student'; // will be overwritten by real name on load
 
 async function fetchCourseData() {
     const name = localStorage.getItem('courseName');
+    if (!name) {
+        window.location.href = window.location.origin + '/private/Dashboard/dashboard.html';
+        return;
+    }
+
     const response = await fetch(window.location.origin + `/api/getcourse/name/${name}`);
     const data = await response.json();
+    if (data.error) {
+        window.location.href = window.location.origin + '/private/Dashboard/dashboard.html';
+        return;
+    }
 
     document.getElementById('course-title').textContent = data.name;
     document.getElementById('course-desc').textContent = data.description;

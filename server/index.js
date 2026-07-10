@@ -1,55 +1,71 @@
-// base modules -------------------
-const crypto = require('crypto');
+// base modules
+const crypto  = require('crypto');
 const session = require('cookie-session');
 
-// custom modules ----------------
+// custom modules
 const { connectDB, UserDB, CourseDB } = require('./DBHandler.js');
-const { endpoint_getChannelInfo, endpoint_youtubePlaylistImg, endpoint_geminiYoutubeSearch, endpoint_openWeatherAPI, GeminiChatBot } = require('./aiSearch.js');
+const { endpoint_getChannelInfo, endpoint_youtubePlaylistImg, endpoint_geminiYoutubeSearch, endpoint_openWeatherAPI, endpoint_chatbot } = require('./aiSearch.js');
 
-// express ----------------------------
+// express
 const express = require('express');
-const app = express();
+const app     = express();
 
-// environment variables ----------------
+// environment variables
 const dotenv = require('dotenv');
 dotenv.config();
 process.env.PORT = process.env.PORT || '8080';
 
-// session handler ----------------
+// Gemini (top-level require — not inside hot request handlers)
+const { GoogleGenerativeAI } = require('@google/generative-ai');
+const makeAI = (key) => new GoogleGenerativeAI(key);
+
+// session handler
+if (!process.env.SESSION_SECRET) {
+    console.error('[FATAL] SESSION_SECRET env var is not set. Refusing to start.');
+    process.exit(1);
+}
 app.use(session({
-    secret: process.env.SESSION_SECRET || 'pragatipath-dev-secret',
-    maxAge: 24 * 60 * 60 * 1000     // 24 hour expiry
+    secret: process.env.SESSION_SECRET,
+    maxAge: 24 * 60 * 60 * 1000
 }));
 
-// clerk ------------------------------
+// clerk
 const clerk = require('@clerk/express');
 app.use(clerk.clerkMiddleware());
 
-// database connection --------------
+// database connection — awaited so server only starts after DB is ready
 connectDB(process.env.MONGO_URI);
 
-const userDBHandler = new UserDB();
+const userDBHandler   = new UserDB();
 const courseDBHandler = new CourseDB();
 
-// public server -------------------
-app.use('/public', express.static('client/public'));
-
-app.get('/', (req, res) => {
-    res.redirect('/public/LandingPage/index.html');
+// WASM headers — scoped to WASM asset paths only (global COEP breaks Clerk auth)
+app.use(['/public/assets/litert-wasm', '/public/assets/plant-disease-vit'], (req, res, next) => {
+    res.setHeader('Cross-Origin-Opener-Policy',   'same-origin');
+    res.setHeader('Cross-Origin-Embedder-Policy', 'require-corp');
+    res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+    next();
 });
 
-// private server ------------------
-app.use('/private', clerk.requireAuth({ signInUrl: process.env.CLERK_SIGN_IN_URL, signUpUrl: process.env.CLERK_SIGN_UP_URL }),
-    userDBHandler.middleware_userAuth.bind(userDBHandler),
-    express.static('client/private'));
-
-app.get('/private/logout', async (req, res) => {
-    const sessionId = clerk.getAuth(req).sessionId;
-    if (!sessionId) {
-        res.json({ error: "No session ID found" });
-        return;
+// public static — serve .wasm with correct MIME type
+app.use('/public', express.static('client/public', {
+    setHeaders(res, filePath) {
+        if (filePath.endsWith('.wasm')) res.setHeader('Content-Type', 'application/wasm');
     }
+}));
 
+app.get('/', (req, res) => res.redirect('/public/LandingPage/index.html'));
+
+// private static (auth-gated)
+app.use('/private',
+    clerk.requireAuth({ signInUrl: process.env.CLERK_SIGN_IN_URL, signUpUrl: process.env.CLERK_SIGN_UP_URL }),
+    userDBHandler.middleware_userAuth.bind(userDBHandler),
+    express.static('client/private')
+);
+
+app.get('/private/logout', clerk.requireAuth(), async (req, res) => {
+    const sessionId = clerk.getAuth(req).sessionId;
+    if (!sessionId) return res.json({ error: "No session ID found" });
     try {
         await clerk.clerkClient.sessions.revokeSession(sessionId);
         res.redirect('/public/Accounts/signin.html');
@@ -58,20 +74,22 @@ app.get('/private/logout', async (req, res) => {
     }
 });
 
-app.get('/api/userinfo', clerk.requireAuth(), userDBHandler.endpoint_userInfo.bind(userDBHandler));
+// ── User API (all require auth) ───────────────────────────────────────────────
+app.get('/api/userinfo',       clerk.requireAuth(), userDBHandler.endpoint_userInfo.bind(userDBHandler));
 app.post('/api/updcourseprog', clerk.requireAuth(), express.json(), userDBHandler.endpoint_updateCourseProgress.bind(userDBHandler));
+app.post('/api/addcourse',     clerk.requireAuth(), express.json(), userDBHandler.endpoint_addCourse.bind(userDBHandler));
+app.post('/api/removecourse',  clerk.requireAuth(), express.json(), userDBHandler.endpoint_removeCourse.bind(userDBHandler));
 
-app.get('/api/getcourses', clerk.requireAuth(), courseDBHandler.endpoint_getCourseList.bind(courseDBHandler));
+// ── Course API (all require auth) ─────────────────────────────────────────────
+app.get('/api/getcourses',                clerk.requireAuth(), courseDBHandler.endpoint_getCourseList.bind(courseDBHandler));
 app.get('/api/getcourse/name/:courseName', clerk.requireAuth(), courseDBHandler.endpoint_getCourseByName.bind(courseDBHandler));
-app.get('/api/getcourse/id/:courseId', clerk.requireAuth(), courseDBHandler.endpoint_getCourseById.bind(courseDBHandler));
+app.get('/api/getcourse/id/:courseId',     clerk.requireAuth(), courseDBHandler.endpoint_getCourseById.bind(courseDBHandler));
 
-app.post('/api/addcourse', clerk.requireAuth(), express.json(), userDBHandler.endpoint_addCourse.bind(userDBHandler));
-app.post('/api/removecourse', clerk.requireAuth(), express.json(), userDBHandler.endpoint_removeCourse.bind(userDBHandler));
+// ── Gemini / AI API (all require auth) ───────────────────────────────────────
+app.get('/api/gemini/youtube',  clerk.requireAuth(), endpoint_geminiYoutubeSearch);
+app.post('/api/gemini/chat',    clerk.requireAuth(), express.json(), endpoint_chatbot);
 
-app.get('/api/gemini/youtube', endpoint_geminiYoutubeSearch);
-app.post('/api/gemini/chat', express.json(), GeminiChatBot.endpoint_chatbot);
-app.post('/api/gemini/analyze-plant', express.json(), async (req, res) => {
-    const { GoogleGenerativeAI } = require('@google/generative-ai');
+app.post('/api/gemini/analyze-plant', clerk.requireAuth(), express.json(), async (req, res) => {
     const key = req.headers['x-gemini-key'];
     if (!key) return res.status(400).json({ error: 'No Gemini API key provided.' });
 
@@ -79,12 +97,10 @@ app.post('/api/gemini/analyze-plant', express.json(), async (req, res) => {
     if (!imageBase64) return res.status(400).json({ error: 'No image provided.' });
 
     try {
-        const ai = new GoogleGenerativeAI(key);
+        const ai    = makeAI(key);
         const model = ai.getGenerativeModel({ model: 'gemini-2.5-flash' });
         const result = await model.generateContent([
-            {
-                inlineData: { data: imageBase64, mimeType }
-            },
+            { inlineData: { data: imageBase64, mimeType } },
             `You are an expert agricultural plant pathologist. Analyze this leaf image.
 Respond ONLY with a valid JSON object, no markdown, no explanation. Use this exact schema:
 {
@@ -98,23 +114,45 @@ Respond ONLY with a valid JSON object, no markdown, no explanation. Use this exa
 }
 If the image is not a plant leaf, set crop and disease to "Not a plant leaf" and confidence to "Low".`
         ]);
-
-        let text = result.response.text().trim();
-        // Strip markdown code fences if model wraps in them
-        text = text.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```$/i, '');
+        let text = result.response.text().trim()
+            .replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```$/i, '');
         const parsed = JSON.parse(text);
         res.json(parsed);
     } catch (err) {
-        // If JSON parse failed, return raw text for debugging
         res.status(500).json({ error: err.message });
     }
 });
 
-app.get('/api/openweather/:lat/:lon', endpoint_openWeatherAPI);
+app.post('/api/gemini/farming-tips', clerk.requireAuth(), express.json(), async (req, res) => {
+    const key = req.headers['x-gemini-key'];
+    if (!key) return res.status(400).json({ error: 'No Gemini API key provided.' });
 
-app.get('/api/youtubethumb/:playlist', endpoint_youtubePlaylistImg);
+    const { temp, humidity, weather, location } = req.body;
+    // Sanitise location to prevent prompt injection
+    const safeLocation = String(location || 'India').slice(0, 100).replace(/[`"\\]/g, '');
 
-app.get('/api/youtubechannel/:playlistId', endpoint_getChannelInfo);
+    try {
+        const ai    = makeAI(key);
+        const model = ai.getGenerativeModel({ model: 'gemini-2.5-flash' });
+        const result = await model.generateContent(
+            `You are an expert agricultural advisor for Indian farmers. Based on this weather:\n` +
+            `Location: ${safeLocation}, Temp: ${Number(temp)}°C, Humidity: ${Number(humidity)}%, Condition: ${weather}\n` +
+            `Give exactly 3 concise practical farming tips. Respond ONLY as a JSON array of 3 strings. No markdown.\n` +
+            `Example: ["Tip one.", "Tip two.", "Tip three."]`
+        );
+        let text = result.response.text().trim()
+            .replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```$/i, '');
+        const tips = JSON.parse(text);
+        res.json({ tips });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ── Weather / YouTube (require auth to protect API keys) ─────────────────────
+app.get('/api/openweather/:lat/:lon',        clerk.requireAuth(), endpoint_openWeatherAPI);
+app.get('/api/youtubethumb/:playlist',        clerk.requireAuth(), endpoint_youtubePlaylistImg);
+app.get('/api/youtubechannel/:playlistId',    clerk.requireAuth(), endpoint_getChannelInfo);
 
 app.listen(+process.env.PORT, () => {
     console.log(`Server is running on port http://localhost:${process.env.PORT}`);

@@ -18,9 +18,11 @@
 
     <!-- onnxruntime-web for offline ViT plant disease model -->
     <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/ort.min.js"></script>
+    <!-- DOMPurify: sanitises marked.js HTML output to prevent XSS in chat -->
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
     <script src="/public/assets/plant-disease-vit/infer.js" defer></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
-    <script src="//translate.google.com/translate_a/element.js?cb=googleTranslateElementInit"></script>
+    <script src="https://translate.google.com/translate_a/element.js?cb=googleTranslateElementInit"></script>
 </head>
 
 <body>
@@ -122,7 +124,7 @@
                 <li class="link-dock">
                     <button class="logout-btn" onclick="logout()">
                         <span>
-                            <svg id="logout-icon" xmlns="http://www.w3.org/2000/svg" height="24px"
+                            <svg id="logout-icon-dock" xmlns="http://www.w3.org/2000/svg" height="24px"
                                 viewBox="0 -960 960 960" width="24px" fill="#fefae0">
                                 <path
                                     d="M200-120q-33 0-56.5-23.5T120-200v-560q0-33 23.5-56.5T200-840h280v80H200v560h280v80H200Zm440-160-55-58 102-102H360v-80h327L585-622l55-58 200 200-200 200Z" />
@@ -143,27 +145,24 @@
                                 d="M234-276q51-39 114-61.5T480-360q69 0 132 22.5T726-276q35-41 54.5-93T800-480q0-133-93.5-226.5T480-800q-133 0-226.5 93.5T160-480q0 59 19.5 111t54.5 93Zm246-164q-59 0-99.5-40.5T340-580q0-59 40.5-99.5T480-720q59 0 99.5 40.5T620-580q0 59-40.5 99.5T480-440Zm0 360q-83 0-156-31.5T197-197q-54-54-85.5-127T80-480q0-83 31.5-156T197-763q54-54 127-85.5T480-880q83 0 156 31.5T763-763q54 54 85.5 127T880-480q0 83-31.5 156T763-197q-54 54-127 85.5T480-80Zm0-80q53 0 100-15.5t86-44.5q-39-29-86-44.5T480-280q-53 0-100 15.5T294-220q39 29 86 44.5T480-160Zm0-360q26 0 43-17t17-43q0-26-17-43t-43-17q-26 0-43 17t-17 43q0 26 17 43t43 17Zm0-60Zm0 360Z" />
                         </svg></span>Welcome, <span id="username">username</span></h1>
                 <div id="google_translate_element"></div>
-                <button id="api-key-btn" onclick="openKeyModal()" title="Set Gemini API Key">
+                <button id="api-key-btn" onclick="document.getElementById('key-modal').showModal(); document.getElementById('key-input').value=getGeminiKey();" title="Set Gemini API Key">
                     <span id="key-status-dot"></span>🔑 API Key
                 </button>
             </div>
 
             <!-- BYOK Key Modal -->
-            <div id="key-modal-overlay" onclick="closeKeyModal()" style="display:none"></div>
-            <div id="key-modal" style="display:none">
+            <dialog id="key-modal">
                 <h3>🔑 Your Gemini API Key</h3>
-                <p>PragatiPath uses your own Gemini API key. It's stored only in your browser and never sent to our servers — only directly to Google.</p>
+                <p>PragatiPath uses your own Gemini API key. It's stored only in your browser's localStorage. When you use AI features, your key is forwarded securely to Google's API — it is never stored on our servers.</p>
                 <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Get a free key at Google AI Studio ↗</a>
-                <input type="password" id="key-input" placeholder="AIza..."
-                    autocomplete="off" spellcheck="false">
+                <input type="password" id="key-input" placeholder="AIza..." autocomplete="off" spellcheck="false">
                 <div id="key-modal-actions">
                     <button id="key-save-btn" onclick="saveGeminiKey()">Save Key</button>
                     <button id="key-clear-btn" onclick="clearGeminiKey()">Clear Key</button>
-                    <button id="key-close-btn" onclick="closeKeyModal()">Close</button>
+                    <button id="key-close-btn" onclick="document.getElementById('key-modal').close()">Close</button>
                 </div>
                 <p id="key-modal-status"></p>
-            </div>
-            </span>
+            </dialog>
             <div class="dashboard-content">
                 <div class="left-side">
                     <div class="my-courses">
@@ -269,23 +268,40 @@
                         <input type="file" id="upload" accept="image/*" style="display:none">
                         <input type="file" id="upload-camera" accept="image/*" capture="environment" style="display:none">
                     </div>
-                    <img id="image" alt="Leaf preview" style="display:none; width:100%; max-width:280px; border-radius:12px; margin:10px auto; display:block;">
+                    <img id="image" alt="Leaf preview" style="display:none; width:100%; max-width:280px; border-radius:12px; margin:10px auto;">
                     <div id="plant-spinner" style="display:none; text-align:center; padding:14px;">
                         <span class="plant-spinner-icon">🔍</span> Analysing...
                     </div>
                     <div id="prediction"></div>
                 </div>
 
+                <div class="card" id="yt-search-card">
+                    <h2>🎬 Farming Video Search</h2>
+                    <p style="font-size:0.82rem;color:#888;margin:0 0 10px">Find agricultural tutorials on YouTube</p>
+                    <div style="display:flex;gap:8px;margin-bottom:12px">
+                        <input id="yt-search-input" type="text"
+                            placeholder="e.g. how to grow wheat, pest control..."
+                            style="flex:1;padding:8px 12px;border-radius:8px;border:1.5px solid #ddd;font-size:0.9rem"
+                            onkeydown="if(event.key==='Enter') searchYouTube()">
+                        <button onclick="searchYouTube()"
+                            style="padding:8px 14px;border-radius:8px;background:#2e7d32;color:#fff;border:none;cursor:pointer;font-size:0.9rem">
+                            Search
+                        </button>
+                    </div>
+                    <div id="yt-results" style="display:flex;flex-direction:column;gap:10px;max-height:340px;overflow-y:auto"></div>
+                </div>
+
                 <div class="card">
-                    <h2>Live Weather</h2>
-                    <button onclick="getWeather()">Get Weather</button>
-                    <div id="weatherResult"></div>
+                    <h2>🌦️ Live Weather & Farming Tips</h2>
+                    <p style="font-size:0.82rem;color:#888;margin:0 0 10px">Auto-loads with your location. Gemini tips when key is set.</p>
+                    <div id="weatherResult"><p style="color:#888;font-size:0.9rem">⏳ Fetching location...</p></div>
                 </div>
 
                 <div class="card">
                     <h2>Field Map & Location</h2>
                     <div id="map"></div>
                 </div>
+            </div>
         </section>
         <!-- contact  -->
         <section class="contact conatiner" id="contact">
