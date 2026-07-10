@@ -504,38 +504,53 @@ function renderGeminiResult(data) {
 
 function renderOfflineResult(top5) {
     if (!top5 || top5.length === 0) {
-        predictionText.innerHTML = `<div class="plant-result"><p style="color:#888">⚠️ Could not identify the plant. Try a clearer close-up of a single leaf.</p></div>`;
+        predictionText.innerHTML = `<div class="plant-result"><p style="color:#888">Could not identify the plant. Try a clearer close-up of a single leaf.</p></div>`;
         return;
     }
 
     const best       = top5[0];
     const confidence = (best.confidence * 100).toFixed(1);
 
-    if (best.confidence < 0.40) {
+    // Handle "Invalid" class — model explicitly signals non-leaf image
+    if (best.label === 'Invalid' && best.confidence > 0.5) {
         predictionText.innerHTML = `
             <div class="plant-result">
-                <p style="color:#888">⚠️ Low confidence (${confidence}%) — couldn't identify.<br>
-                Try a clearer close-up in good lighting.</p>
-                <p class="plant-result-source">Offline ViT · Set a Gemini key for smarter results</p>
+                <p style="color:#888">Image doesn't appear to be a crop leaf.<br>
+                Please take a close-up photo of a single leaf (Corn, Potato, Rice, or Wheat).</p>
+                <p class="plant-result-source">Offline ViT</p>
             </div>`;
         return;
     }
 
-    // Parse "Crop___Disease" label format
+    // Low confidence fallback
+    if (best.confidence < 0.35) {
+        predictionText.innerHTML = `
+            <div class="plant-result">
+                <p style="color:#888">Low confidence (${confidence}%) — try a clearer close-up in good lighting.</p>
+                <p class="plant-result-source">Offline ViT · Set a Gemini key for smarter results on any crop</p>
+            </div>`;
+        return;
+    }
+
+    // Parse "Crop___Condition" format
     const parseLabel = (raw) => {
-        const parts = raw.replace(/[()]/g, '').split('___');
-        const crop    = (parts[0] || 'Unknown').replace(/_/g, ' ').trim();
-        const disease = (parts[1] || 'Unknown').replace(/_/g, ' ').trim();
-        return { crop, disease, healthy: (parts[1] || '').toLowerCase() === 'healthy' };
+        const parts   = (raw || '').split('___');
+        const crop    = (parts[0] || 'Unknown').replace(/_/g, ' ');
+        const disease = (parts[1] || 'Unknown').replace(/_/g, ' ');
+        const healthy = disease.toLowerCase() === 'healthy';
+        return { crop, disease, healthy };
     };
 
     const { crop, disease, healthy } = parseLabel(best.label);
 
-    // Build top-3 alternatives row
-    const altRows = top5.slice(1, 3).map(t => {
-        const { crop: c, disease: d } = parseLabel(t.label);
-        return `<span class="plant-alt">${c} – ${d} <em>(${(t.confidence * 100).toFixed(0)}%)</em></span>`;
-    }).join('');
+    // Top-2 alternatives (skip Invalid)
+    const altRows = top5.slice(1, 4)
+        .filter(t => t.label !== 'Invalid')
+        .slice(0, 2)
+        .map(t => {
+            const { crop: c, disease: d } = parseLabel(t.label);
+            return `<span class="plant-alt">${c} – ${d} <em>(${(t.confidence * 100).toFixed(0)}%)</em></span>`;
+        }).join('');
 
     predictionText.innerHTML = `
         <div class="plant-result">
@@ -552,7 +567,7 @@ function renderOfflineResult(top5) {
                 <span class="plant-value">${confidence}%</span>
             </div>
             ${altRows ? `<div class="plant-result-section"><strong>Other possibilities</strong><p>${altRows}</p></div>` : ''}
-            <p class="plant-result-source">Offline ViT-tiny · 98% benchmark accuracy · Set a Gemini key for treatment advice</p>
+            <p class="plant-result-source">Offline ViT-tiny · Corn / Potato / Rice / Wheat · Set a Gemini key for any crop + treatment advice</p>
         </div>`;
 }
 
@@ -615,176 +630,7 @@ const weatherDiv = document.getElementById('weatherResult');
 
 
 
-let tfModel = null;
-let tfClassList = null;
-let tfModelLoading = false;
 
-const plantUpload       = document.getElementById('upload');
-const plantUploadCamera = document.getElementById('upload-camera');
-const plantImg          = document.getElementById('image');
-const predictionText    = document.getElementById('prediction');
-const plantSpinner      = document.getElementById('plant-spinner');
-const plantModeBadge    = document.getElementById('plant-mode-badge');
-
-function setPlantModeBadge() {
-    if (!plantModeBadge) return;
-    if (getGeminiKey()) {
-        plantModeBadge.textContent = '✨ Gemini Vision';
-        plantModeBadge.className = 'plant-mode-badge gemini';
-    } else {
-        plantModeBadge.textContent = '📴 Offline Model';
-        plantModeBadge.className = 'plant-mode-badge offline';
-    }
-}
-
-// Lazy-load TF.js model only when needed (offline fallback)
-async function ensureTFModel() {
-    if (tfModel) return true;
-    if (tfModelLoading) return false;
-    tfModelLoading = true;
-    try {
-        predictionText.innerHTML = '<p style="color:#888">⏳ Loading offline model (~13 MB)...</p>';
-        tfClassList = await (await fetch(window.location.origin + '/public/assets/plant-disease-tfjs-default-v1/class_indices.json')).json();
-        tfModel = await tf.loadLayersModel(
-            window.location.origin + '/public/assets/plant-disease-tfjs-default-v1/model.json',
-            { fromTFHub: false }
-        );
-        predictionText.innerHTML = '';
-        return true;
-    } catch (e) {
-        predictionText.innerHTML = '<p style="color:#c00">❌ Failed to load offline model.</p>';
-        tfModelLoading = false;
-        return false;
-    }
-}
-
-function renderGeminiResult(data) {
-    const severityColor = { None: '#4CAF50', Low: '#FFC107', Medium: '#FF9800', High: '#F44336' };
-    const col = severityColor[data.severity] || '#888';
-    const healthIcon = data.isHealthy ? '✅' : '🔴';
-    predictionText.innerHTML = `
-        <div class="plant-result">
-            <div class="plant-result-row">
-                <span class="plant-label">Crop</span>
-                <span class="plant-value">${data.crop}</span>
-            </div>
-            <div class="plant-result-row">
-                <span class="plant-label">Condition</span>
-                <span class="plant-value">${healthIcon} ${data.disease}</span>
-            </div>
-            <div class="plant-result-row">
-                <span class="plant-label">Severity</span>
-                <span class="plant-severity-badge" style="background:${col}">${data.severity}</span>
-            </div>
-            <div class="plant-result-row">
-                <span class="plant-label">Confidence</span>
-                <span class="plant-value">${data.confidence}</span>
-            </div>
-            ${!data.isHealthy ? `
-            <div class="plant-result-section">
-                <strong>💊 Treatment</strong>
-                <p>${data.treatment}</p>
-            </div>
-            <div class="plant-result-section">
-                <strong>🛡️ Prevention</strong>
-                <p>${data.prevention}</p>
-            </div>` : `
-            <div class="plant-result-section">
-                <p style="color:#4CAF50">Your plant looks healthy! ${data.prevention}</p>
-            </div>`}
-            <p class="plant-result-source">Powered by Gemini Vision</p>
-        </div>`;
-}
-
-function renderTFResult(classList, predictions) {
-    const topIdx  = predictions.indexOf(Math.max(...predictions));
-    const confidence = (Math.max(...predictions) * 100).toFixed(1);
-    if (confidence < 50) {
-        predictionText.innerHTML = `
-            <div class="plant-result">
-                <p style="color:#888">⚠️ Couldn't identify the plant with confidence (${confidence}%).<br>
-                Try a clearer close-up of a single leaf in good lighting.</p>
-                <p class="plant-result-source">Offline Model · Set an API key for better results</p>
-            </div>`;
-        return;
-    }
-    const parts   = (classList[topIdx] || '').split('___');
-    const crop    = (parts[0] || 'Unknown').replace(/_/g, ' ');
-    const disease = (parts[1] || 'Unknown').replace(/_/g, ' ');
-    const healthy = disease.toLowerCase() === 'healthy';
-    predictionText.innerHTML = `
-        <div class="plant-result">
-            <div class="plant-result-row">
-                <span class="plant-label">Crop</span>
-                <span class="plant-value">${crop}</span>
-            </div>
-            <div class="plant-result-row">
-                <span class="plant-label">Condition</span>
-                <span class="plant-value">${healthy ? '✅' : '🔴'} ${disease}</span>
-            </div>
-            <div class="plant-result-row">
-                <span class="plant-label">Confidence</span>
-                <span class="plant-value">${confidence}%</span>
-            </div>
-            <p class="plant-result-source">Offline Model · Set a Gemini key for treatment advice</p>
-        </div>`;
-}
-
-async function analyzeImage(file) {
-    if (!file) return;
-
-    plantImg.src = URL.createObjectURL(file);
-    plantImg.style.display = 'block';
-    plantSpinner.style.display = 'block';
-    predictionText.innerHTML = '';
-    setPlantModeBadge();
-
-    const key = getGeminiKey();
-
-    if (key) {
-        // ── Gemini Vision path ──
-        try {
-            const base64 = await new Promise((resolve, reject) => {
-                const reader = new FileReader();
-                reader.onload = () => resolve(reader.result.split(',')[1]);
-                reader.onerror = reject;
-                reader.readAsDataURL(file);
-            });
-            const res = await fetch('/api/gemini/analyze-plant', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'x-gemini-key': key },
-                body: JSON.stringify({ imageBase64: base64, mimeType: file.type || 'image/jpeg' })
-            });
-            const data = await res.json();
-            if (data.error) throw new Error(data.error);
-            renderGeminiResult(data);
-        } catch (err) {
-            predictionText.innerHTML = `<p style="color:#c00">❌ Gemini error: ${err.message}</p>`;
-        }
-    } else {
-        // ── TF.js offline fallback ──
-        const loaded = await ensureTFModel();
-        if (!loaded) { plantSpinner.style.display = 'none'; return; }
-
-        plantImg.onload = async () => {
-            const tensor = tf.browser.fromPixels(plantImg)
-                .resizeNearestNeighbor([224, 224])
-                .toFloat().div(tf.scalar(255.0)).expandDims();
-            const predictions = Array.from(await tfModel.predict(tensor).data());
-            renderTFResult(tfClassList, predictions);
-            tensor.dispose();
-            plantSpinner.style.display = 'none';
-        };
-        return; // onload handles the rest
-    }
-
-    plantSpinner.style.display = 'none';
-}
-
-plantUpload.addEventListener('change', (e) => analyzeImage(e.target.files[0]));
-plantUploadCamera.addEventListener('change', (e) => analyzeImage(e.target.files[0]));
-
-const weatherDiv = document.getElementById('weatherResult');
 
 // Weather by coordinates (for location-based fetch)
 async function getWeatherByCoords(lat, lon) {
