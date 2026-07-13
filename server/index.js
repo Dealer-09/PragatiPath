@@ -74,7 +74,7 @@ app.get('/api/getcourse/id/:courseId',     clerk.requireAuth(), courseDBHandler.
 app.get('/api/gemini/youtube',  clerk.requireAuth(), endpoint_geminiYoutubeSearch);
 app.post('/api/gemini/chat',    clerk.requireAuth(), express.json(), endpoint_chatbot);
 
-app.post('/api/gemini/analyze-plant', clerk.requireAuth(), express.json(), async (req, res) => {
+app.post('/api/gemini/analyze-plant', clerk.requireAuth(), express.json({ limit: '10mb' }), async (req, res) => {
     const key = req.headers['x-gemini-key'];
     if (!key) return res.status(400).json({ error: 'No Gemini API key provided.' });
 

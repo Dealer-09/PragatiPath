@@ -620,7 +620,11 @@ async function analyzeImage(file) {
             });
             const res = await fetch('/api/gemini/analyze-plant', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'x-gemini-key': key },
+                headers: { 
+                    'Content-Type': 'application/json', 
+                    'Accept': 'application/json',
+                    'x-gemini-key': key 
+                },
                 body: JSON.stringify({ imageBase64: base64, mimeType: file.type || 'image/jpeg' })
             });
             const data = await res.json();
