@@ -1,6 +1,9 @@
 const mongoose = require('mongoose');
 const clerk = require('@clerk/express');
 
+// Track users already accounted for this server session (replaces cookie-session)
+const _accountedFor = new Set();
+
 async function connectDB(URI) {
     try {
         await mongoose.connect(URI);
@@ -28,8 +31,8 @@ class UserDB {
     static Users = mongoose.model('users', UserDB.userSchema);
 
     async middleware_userAuth(req, res, next) {
-        if (!req.session.accountedFor) {
-            req.session.accountedFor = true;
+        if (!_accountedFor.has(req.auth.userId)) {
+            _accountedFor.add(req.auth.userId);
             try {
                 const existing = await UserDB.Users.findOne({ userId: req.auth.userId });
                 if (existing === null) {
@@ -127,28 +130,37 @@ class UserDB {
                 return res.status(400).json({ error: "Course name and progress are required" });
             }
 
-            // Validate progress is a sane number (0–100 increment)
             const delta = Math.max(0, Math.min(100, Number(progress)));
             if (isNaN(delta)) return res.status(400).json({ error: "Invalid progress value" });
 
-            const userDbStore = await UserDB.Users.findOne({ userId: req.auth.userId });
-            if (!userDbStore) return res.status(404).json({ error: "User not found" });
+            // ── Step 1: atomically increment progress on the matching subdocument ──
+            // $inc avoids loading the full document and re-validating ALL subdocuments
+            // (which fails when other enrolledCourse entries have bad/missing name fields).
+            const updated = await UserDB.Users.findOneAndUpdate(
+                { userId: req.auth.userId, 'enrolledCourses.name': courseName },
+                { $inc: { 'enrolledCourses.$.progress': delta } },
+                { new: true, runValidators: false }
+            );
 
-            const course = userDbStore.enrolledCourses.find(c => c.name === courseName);
-            if (!course) return res.status(404).json({ error: "Course not found in enrolled courses" });
-
-            course.progress = Math.min(100, course.progress + delta);
-
-            if (course.progress >= 100) {
-                // Prevent duplicate completions
-                if (!userDbStore.completedCourses.includes(courseName)) {
-                    userDbStore.completedCourses.push(courseName);
-                }
-                userDbStore.enrolledCourses = userDbStore.enrolledCourses.filter(c => c.name !== courseName);
+            if (!updated) {
+                // Course not found in enrolledCourses — could already be completed or not enrolled
+                return res.status(404).json({ error: "Course not found in enrolled courses" });
             }
 
-            await userDbStore.save();
-            res.json(userDbStore);
+            // ── Step 2: if progress reached 100, move to completedCourses ──────────
+            const course = updated.enrolledCourses.find(c => c.name === courseName);
+            if (course && course.progress >= 100) {
+                await UserDB.Users.findOneAndUpdate(
+                    { userId: req.auth.userId },
+                    {
+                        $pull:     { enrolledCourses:   { name: courseName } },
+                        $addToSet: { completedCourses: courseName }
+                    },
+                    { runValidators: false }
+                );
+            }
+
+            res.json({ ok: true, progress: course?.progress ?? delta });
         } catch (error) {
             console.error("[UserDB] endpoint_updateCourseProgress failed:", error.message);
             res.status(500).json({ error: "Internal server error" });

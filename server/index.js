@@ -1,7 +1,3 @@
-// base modules
-const crypto  = require('crypto');
-const session = require('cookie-session');
-
 // custom modules
 const { connectDB, UserDB, CourseDB } = require('./DBHandler.js');
 const { endpoint_getChannelInfo, endpoint_youtubePlaylistImg, endpoint_geminiYoutubeSearch, endpoint_openWeatherAPI, endpoint_chatbot } = require('./aiSearch.js');
@@ -11,23 +7,12 @@ const express = require('express');
 const app     = express();
 
 // environment variables
-const dotenv = require('dotenv');
-dotenv.config();
+// Bun natively loads .env files, no need for the dotenv package
 process.env.PORT = process.env.PORT || '8080';
 
 // Gemini (top-level require — not inside hot request handlers)
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const makeAI = (key) => new GoogleGenerativeAI(key);
-
-// session handler
-if (!process.env.SESSION_SECRET) {
-    console.error('[FATAL] SESSION_SECRET env var is not set. Refusing to start.');
-    process.exit(1);
-}
-app.use(session({
-    secret: process.env.SESSION_SECRET,
-    maxAge: 24 * 60 * 60 * 1000
-}));
 
 // clerk
 const clerk = require('@clerk/express');
@@ -153,6 +138,17 @@ app.post('/api/gemini/farming-tips', clerk.requireAuth(), express.json(), async 
 app.get('/api/openweather/:lat/:lon',        clerk.requireAuth(), endpoint_openWeatherAPI);
 app.get('/api/youtubethumb/:playlist',        clerk.requireAuth(), endpoint_youtubePlaylistImg);
 app.get('/api/youtubechannel/:playlistId',    clerk.requireAuth(), endpoint_getChannelInfo);
+
+// ── Global Error Handler (Express 5 fallback) ────────────────────────────────
+// If any async route throws an unhandled error, Express 5 catches it here.
+// This ensures we ALWAYS return JSON to the client, preventing SyntaxErrors
+// caused by default HTML error pages.
+app.use((err, req, res, next) => {
+    console.error('[Express Error]', err);
+    res.status(err.status || 500).json({ 
+        error: err.message || 'Internal Server Error' 
+    });
+});
 
 app.listen(+process.env.PORT, () => {
     console.log(`Server is running on port http://localhost:${process.env.PORT}`);

@@ -10,6 +10,15 @@
     <link rel="shortcut icon" href="../assets/plant.png" type="image/png">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 
+    <!-- Instantly detect if a cached page is loading with an expired session -->
+    <script>
+        window.addEventListener('error', function(e) {
+            if (e.message && (e.message.includes("Unexpected token '<'") || e.message.includes("is not valid JSON"))) {
+                window.location.href = '/public/Accounts/signin.html';
+            }
+        });
+    </script>
+
     <script async crossorigin="anonymous"
         data-clerk-publishable-key="pk_test_b3JnYW5pYy1idW5ueS00OC5jbGVyay5hY2NvdW50cy5kZXYk"
         src="https://organic-bunny-48.clerk.accounts.dev/npm/@clerk/clerk-js@5/dist/clerk.browser.js"
@@ -338,9 +347,7 @@
             includedLanguages: 'en,hi,bn,ta,te,ml,kn,gu,pa,mr,or,ur,as,ne,sd', // Languages to include if you wish more
             floatPosition: 0 
         }, 'google_translate_element');
-        
         }
-        googleTranslateElementInit();
     </script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/15.0.7/marked.min.js"></script>
     <script src="script.js"></script>

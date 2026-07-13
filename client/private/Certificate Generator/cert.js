@@ -21,10 +21,17 @@ function downloadCertificate() {
 
 // Auto-populate on page load
 window.addEventListener('load', () => {
-    const name = localStorage.getItem('cert_name') || 'Student';
-    const course = localStorage.getItem('cert_course') || 'Course';
-    const date = localStorage.getItem('cert_date') || new Date().toLocaleDateString();
-    document.getElementById('name').innerText = name;
+    const name   = localStorage.getItem('cert_name');
+    const course = localStorage.getItem('cert_course');
+    const date   = localStorage.getItem('cert_date') || new Date().toLocaleDateString();
+
+    // Guard: redirect to dashboard if navigated here directly without a completed course
+    if (!name || !course) {
+        window.location.href = window.location.origin + '/private/Dashboard/dashboard.html';
+        return;
+    }
+
+    document.getElementById('name').innerText   = name;
     document.getElementById('course').innerText = course;
-    document.getElementById('date').innerText = date;
+    document.getElementById('date').innerText   = date;
 });

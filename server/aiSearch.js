@@ -120,6 +120,36 @@ async function endpoint_openWeatherAPI(req, res) {
 
 const botMap = new LRUCache({ max: 1000, ttl: 1000 * 60 * 60 * 24 });
 
+// Retry a Gemini call once if it's a transient 503 overload
+async function withRetry(fn, retries = 1, delayMs = 2000) {
+    try {
+        return await fn();
+    } catch (err) {
+        if (retries > 0 && err.message && err.message.includes('503')) {
+            await new Promise(r => setTimeout(r, delayMs));
+            return withRetry(fn, retries - 1, delayMs * 2);
+        }
+        throw err;
+    }
+}
+
+function friendlyGeminiError(err) {
+    const msg = err.message || '';
+    if (msg.includes('503') || msg.includes('high demand')) {
+        return 'Gemini is temporarily overloaded. Please try again in a few seconds.';
+    }
+    if (msg.includes('API_KEY_INVALID') || msg.includes('400')) {
+        return 'Your Gemini API key is invalid. Please re-enter it in the dashboard settings (🔑 API Key).';
+    }
+    if (msg.includes('PERMISSION_DENIED') || msg.includes('403')) {
+        return 'Your API key does not have access to this Gemini model. Check your Google AI Studio permissions.';
+    }
+    if (msg.includes('429') || msg.includes('RESOURCE_EXHAUSTED')) {
+        return 'Gemini rate limit hit. Please wait a moment and try again.';
+    }
+    return `Gemini error: ${msg}`;
+}
+
 async function endpoint_chatbot(req, res) {
     // Validate query FIRST before any expensive work
     const query = req.body?.query;
@@ -128,34 +158,34 @@ async function endpoint_chatbot(req, res) {
     const ai = getAI(req);
     if (!ai) return res.status(400).json({ error: "No Gemini API key provided. Open the dashboard settings and enter your key." });
 
-    if (!req.session.botID) req.session.botID = crypto.randomUUID();
-
     const keyHash = crypto.createHash('sha256')
         .update(req.headers['x-gemini-key']).digest('hex').slice(0, 8);
-    const cacheKey = `${req.session.botID}-${keyHash}`;
-
-    let bot = botMap.get(cacheKey);
-    if (!bot) {
-        const model = ai.getGenerativeModel({ model: 'gemini-2.5-flash' });
-        bot = model.startChat();
-        await bot.sendMessage(
-            "You are a helpful assistant answering questions to a farmer requiring help in agriculture in our \"PragatiPath\" farming education site\n" +
-            "Also don't answer any questions unrelated to farming, agriculture, and rural life since it is disallowed on this platform. Also, push the user towards education and skill building.\n" +
-            "Here are some useful answers to common questions:\n" +
-            "How to avail courses? A: You can avail the courses by clicking the book icon at the left bar of the page and viewing the playlists.\n" +
-            "How to contact the developers? A: You can contact the developers by clicking the email button at the left bar of the page.\n" +
-            "How to use the AI tools? A: Click the AI tools button at the left bar — pass a sick leaf image to the disease finder, or check weather patterns.\n" +
-            "Who are the developers? A: Alpha 4 – Rouvik Maji, Vikash Kumar Gupta, Rajbeer Saha (STCET), and Archisman Pal (AOT) — built this at the 2025 CODEFLOW Hackathon."
-        );
-        botMap.set(cacheKey, bot);
-    }
+    const cacheKey = `${req.auth.userId}-${keyHash}`;
 
     try {
-        const msg = await bot.sendMessage(query);
+        let bot = botMap.get(cacheKey);
+        if (!bot) {
+            const model = ai.getGenerativeModel({ model: 'gemini-2.5-flash' });
+            bot = model.startChat();
+            // System prompt — if this throws (bad key, rate limit, etc.)
+            // the error is caught below and returned as JSON, not an HTML 500 page.
+            await bot.sendMessage(
+                "You are a helpful assistant answering questions to a farmer requiring help in agriculture in our \"PragatiPath\" farming education site\n" +
+                "Also don't answer any questions unrelated to farming, agriculture, and rural life since it is disallowed on this platform. Also, push the user towards education and skill building.\n" +
+                "Here are some useful answers to common questions:\n" +
+                "How to avail courses? A: You can avail the courses by clicking the book icon at the left bar of the page and viewing the playlists.\n" +
+                "How to contact the developers? A: You can contact the developers by clicking the email button at the left bar of the page.\n" +
+                "How to use the AI tools? A: Click the AI tools button at the left bar — pass a sick leaf image to the disease finder, or check weather patterns.\n" +
+                "Who are the developers? A: Alpha 4 – Rouvik Maji, Vikash Kumar Gupta, Rajbeer Saha (STCET), and Archisman Pal (AOT) — built this at the 2025 CODEFLOW Hackathon."
+            );
+            botMap.set(cacheKey, bot); // only cache after successful init
+        }
+
+        const msg = await withRetry(() => bot.sendMessage(query));
         res.json({ response: msg.response.text() });
     } catch (err) {
-        botMap.delete(cacheKey);
-        res.status(400).json({ error: `Gemini error: ${err.message}` });
+        botMap.delete(cacheKey); // evict broken session so next request retries fresh
+        res.status(400).json({ error: friendlyGeminiError(err) });
     }
 }
 

@@ -1,10 +1,30 @@
 let player;
 let watchSeconds = 0;
 let timer = null;
-const COURSE_DURATION_SECS = 1200; // 20 min = 100% complete
-const PROGRESS_REPORT_INTERVAL = 30; // sync to server every 30s
+const PROGRESS_REPORT_INTERVAL = 30;
 let lastReportedSeconds = 0;
-let userName = 'Student'; // will be overwritten by real name on load
+let userName = 'Student';
+let courseCompleted = false;
+
+// ── YouTube API readiness coordination ───────────────────────────────────────
+// Either the API fires first (ytAPIReady = true) or the iframe is injected
+// first (iframeReady = true). initPlayer() waits for BOTH before constructing
+// YT.Player — eliminating the race condition that broke event attachment.
+let ytAPIReady   = false;
+let iframeReady  = false;
+
+window.onYouTubeIframeAPIReady = function () {
+    ytAPIReady = true;
+    if (iframeReady) initPlayer();
+};
+
+function initPlayer() {
+    player = new YT.Player('yt-player', {
+        events: { onStateChange: onPlayerStateChange }
+    });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 async function fetchCourseData() {
     const name = localStorage.getItem('courseName');
@@ -21,8 +41,8 @@ async function fetchCourseData() {
     }
 
     document.getElementById('course-title').textContent = data.name;
-    document.getElementById('course-desc').textContent = data.description;
-    document.getElementById('course-lang').textContent = data.medium;
+    document.getElementById('course-desc').textContent  = data.description;
+    document.getElementById('course-lang').textContent  = data.medium;
 
     const container = document.querySelector('.video-preview');
     container.innerHTML = `
@@ -35,126 +55,141 @@ async function fetchCourseData() {
             allowfullscreen>
         </iframe>`;
 
+    // Iframe is now in the DOM — signal readiness and init if API is also ready
+    iframeReady = true;
+    if (ytAPIReady) initPlayer();
+
     try {
-        const chres = await fetch(window.location.origin + `/api/youtubechannel/${localStorage.getItem("coursePlaylist")}`);
+        const chres  = await fetch(window.location.origin + `/api/youtubechannel/${localStorage.getItem("coursePlaylist")}`);
         const chdata = await chres.json();
         if (!chdata.error) {
-            document.getElementById('channel-img').src = chdata.channelThumbnail;
+            document.getElementById('channel-img').src         = chdata.channelThumbnail;
             document.getElementById('channel-name').textContent = chdata.channelTitle;
             document.getElementById('channel-desc').textContent = chdata.channelDescription;
-            document.getElementById('channel-link').href = `https://www.youtube.com/channel/${chdata.channelId}`;
-            document.getElementById('channel-link').target = "_blank";
-            document.getElementById('channel-link').rel = "noopener noreferrer";
+            document.getElementById('channel-link').href        = `https://www.youtube.com/channel/${chdata.channelId}`;
+            document.getElementById('channel-link').target      = '_blank';
+            document.getElementById('channel-link').rel         = 'noopener noreferrer';
             document.getElementById('channel-link').textContent = chdata.channelTitle;
         }
-    } catch (_) {
-        // YouTube API key not set — skip channel info gracefully
-    }
-
-    checkCertificateEligibility(data.name);
+    } catch (_) {}
 }
 
-function checkCertificateEligibility(courseName) {
-    const courseId = localStorage.getItem("courseId");
-    const watched = parseInt(localStorage.getItem(`watched_${courseId}`)) || 0;
-    const estimatedDuration = 1200; // 20 minutes = considered complete
+function unlockCertificate(courseName) {
+    if (courseCompleted) return;
+    courseCompleted = true;
 
-    if (watched >= estimatedDuration) {
+    clearInterval(timer);
+
+    const remainingDelta = watchSeconds - lastReportedSeconds;
+    if (remainingDelta > 0) reportProgress(remainingDelta);
+
+    if (!document.querySelector('.cert-btn')) {
         const container = document.querySelector('.video-preview');
-        const certBtn = document.createElement('button');
-        certBtn.innerText = "🎉 Download Certificate";
-        certBtn.className = "cert-btn";
-        certBtn.style.marginTop = "1rem";
+        const certBtn   = document.createElement('button');
+        certBtn.innerText          = '🎉 DOWNLOAD CERTIFICATE 🎉';
+        certBtn.className          = 'cert-btn';
+        certBtn.style.display      = 'block';
+        certBtn.style.marginTop    = '2rem';
+        certBtn.style.padding      = '1rem 2rem';
+        certBtn.style.fontSize     = '1.5rem';
+        certBtn.style.background   = '#4CAF50';
+        certBtn.style.color        = 'white';
+        certBtn.style.border       = 'none';
+        certBtn.style.borderRadius = '8px';
+        certBtn.style.cursor       = 'pointer';
+        certBtn.style.width        = '100%';
+        certBtn.style.fontWeight   = 'bold';
+        certBtn.style.boxShadow    = '0 4px 12px rgba(0,0,0,0.25)';
         certBtn.onclick = () => {
-            localStorage.setItem("cert_name", userName);
-            localStorage.setItem("cert_course", courseName);
-            localStorage.setItem("cert_date", new Date().toLocaleDateString());
-            window.location.href = "../Certificate Generator/cert.html";
+            localStorage.setItem('cert_name',   userName);
+            localStorage.setItem('cert_course', courseName);
+            localStorage.setItem('cert_date',   new Date().toLocaleDateString());
+            window.location.href = '../Certificate Generator/cert.html';
         };
         container.appendChild(certBtn);
     }
+
+    setTimeout(() => {
+        alert('🎉 Congratulations! You have completed the course!\n\nScroll down and click the big green button to download your certificate!');
+    }, 300);
 }
 
-// Send accumulated progress to server as a PERCENTAGE increment
 async function reportProgress(deltaSeconds) {
     const courseName = localStorage.getItem('courseName');
     if (!courseName || deltaSeconds <= 0) return;
 
-    // Convert seconds watched → percentage of estimated total duration
-    const percentIncrement = (deltaSeconds / COURSE_DURATION_SECS) * 100;
+    const duration       = player ? player.getDuration() : 0;
+    const base           = duration > 0 ? duration : 1200;
+    const percentIncrement = (deltaSeconds / base) * 100;
 
     try {
         await fetch('/api/updcourseprog', {
-            method: 'POST',
+            method:  'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                courseName,
-                progress: percentIncrement
-            })
+            body:    JSON.stringify({ courseName, progress: percentIncrement })
         });
     } catch (err) {
-        console.warn('[Progress] Could not sync progress to server:', err);
+        console.warn('[Progress] Could not sync:', err);
     }
 }
 
-window.onYouTubeIframeAPIReady = function () {
-    player = new YT.Player('yt-player', {
-        events: {
-            'onStateChange': onPlayerStateChange
-        }
-    });
-};
-
 function onPlayerStateChange(event) {
     if (event.data === YT.PlayerState.PLAYING) {
+        clearInterval(timer); // guard: clear any dangling timer before starting
+        const courseName = localStorage.getItem('courseName');
+
         timer = setInterval(() => {
             watchSeconds++;
-            const courseId = localStorage.getItem("courseId");
-
-            // Persist locally every second
+            const courseId = localStorage.getItem('courseId');
             localStorage.setItem(`watched_${courseId}`, watchSeconds);
 
-            // Report to server every PROGRESS_REPORT_INTERVAL seconds
+            // Position-based completion — works for both single videos and playlists
+            if (!courseCompleted && player) {
+                const currentTime = player.getCurrentTime();
+                const duration    = player.getDuration();
+                if (duration > 0 && currentTime >= duration * 0.95) {
+                    unlockCertificate(courseName);
+                }
+            }
+
             const delta = watchSeconds - lastReportedSeconds;
             if (delta >= PROGRESS_REPORT_INTERVAL) {
                 lastReportedSeconds = watchSeconds;
                 reportProgress(delta);
             }
         }, 1000);
+
     } else {
         clearInterval(timer);
 
-        // Flush any remaining unreported progress when paused/ended
         const delta = watchSeconds - lastReportedSeconds;
         if (delta > 0) {
             lastReportedSeconds = watchSeconds;
             reportProgress(delta);
         }
-
-        // Check cert eligibility after each pause
-        const courseName = localStorage.getItem('courseName');
-        if (courseName) checkCertificateEligibility(courseName);
     }
 }
 
-// Load the YouTube IFrame API
-const ytScript = document.createElement('script');
-ytScript.src = "https://www.youtube.com/iframe_api";
+// Load YouTube IFrame API
+const ytScript  = document.createElement('script');
+ytScript.src    = 'https://www.youtube.com/iframe_api';
 document.head.appendChild(ytScript);
 
-// Load user name + course data on page load
+// Boot sequence
 window.addEventListener('load', async () => {
-    const courseId = localStorage.getItem("courseId");
+    const courseId = localStorage.getItem('courseId');
     if (courseId) {
-        watchSeconds = parseInt(localStorage.getItem(`watched_${courseId}`)) || 0;
+        watchSeconds        = parseInt(localStorage.getItem(`watched_${courseId}`)) || 0;
         lastReportedSeconds = watchSeconds;
     }
 
-    // Fetch real user name for certificate
     try {
-        const res = await fetch('/api/userinfo');
-        const data = await res.json();
-        userName = data.fullName || data.name || 'Student';
+        const res         = await fetch('/api/userinfo');
+        const contentType = res.headers.get('content-type');
+        if (contentType && contentType.includes('application/json')) {
+            const data = await res.json();
+            userName   = data.fullName || data.name || 'Student';
+        }
     } catch (_) {}
 
     fetchCourseData();

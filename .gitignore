@@ -51,3 +51,6 @@ build/
 logs/
 npm-debug.log*
 bun-debug.log*
+
+#Docs
+pragatipath-2.0-pivot-plan.md

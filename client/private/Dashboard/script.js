@@ -290,22 +290,24 @@ function setupChat() {
 
 // @author Rouvik Maji
 async function unenrollCourse(button) {
-    const res = await fetch('/api/removecourse', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-            courseName: button.dataset.coursename
-        })
-    });
-    const data = await res.json();
-    if (data.error) {
-        console.error("Error unenrolling course:", data.error);
-        location.reload();
-    } else {
-        location.reload();
+    try {
+        const res = await fetch('/api/removecourse', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ courseName: button.dataset.coursename })
+        });
+        const ct = res.headers.get('content-type');
+        if (!ct || !ct.includes('application/json')) {
+            // Session expired — redirect rather than crash
+            window.location.href = window.location.origin + '/public/Accounts/signin.html';
+            return;
+        }
+        const data = await res.json();
+        if (data.error) console.error('Error unenrolling course:', data.error);
+    } catch (err) {
+        console.warn('unenrollCourse failed:', err);
     }
+    location.reload();
 }
 
 // @author Rouvik Maji
@@ -321,6 +323,14 @@ async function courseShortHandler(button) {
 window.addEventListener('load', async () => {
     try {
         const req = await fetch('/api/userinfo');
+        
+        const contentType = req.headers.get("content-type");
+        if (!contentType || !contentType.includes("application/json")) {
+            console.warn("Session expired or invalid response. Redirecting to sign-in.");
+            window.location.href = window.location.origin + '/public/Accounts/signin.html';
+            return;
+        }
+
         const res = await req.json();
         userData = res;
 
@@ -331,31 +341,46 @@ window.addEventListener('load', async () => {
         }
 
         const mycoursesContainer = document.querySelector('.course-cards-container');
-        const enrolledCourses = userData.enrolledCourses || [];
+        const rawEnrolled = userData.enrolledCourses || [];
+        const rawCompleted = userData.completedCourses || [];
 
-        if (enrolledCourses.length === 0) {
+        // Normalize both lists into a single array of {name, progress} objects
+        const allMyCourses = [
+            ...rawEnrolled.map(c => typeof c === 'object' ? { name: c.name || c.courseName, progress: c.progress || 0 } : { name: c, progress: 0 }),
+            ...rawCompleted.map(c => ({ name: c, progress: 100 }))
+        ].filter(c => c.name && c.name !== 'undefined');
+
+        if (allMyCourses.length === 0) {
             mycoursesContainer.innerHTML = '<p style="color:#888">No courses enrolled yet. Browse courses below!</p>';
         }
 
         let shown = 0;
-        for (const enrollment of enrolledCourses) {
+        for (const enrollment of allMyCourses) {
             if (shown++ >= 3) break; // show only first 3
 
-            // enrolledCourses is now [{name, progress}] objects
-            const courseName = typeof enrollment === 'object' ? enrollment.name : enrollment;
-            const progress = typeof enrollment === 'object' ? enrollment.progress : 0;
+            let courseName = enrollment.name;
+            const progress = enrollment.progress;
 
-            const courseRes = await fetch(`/api/getcourse/name/${courseName}`);
+            const courseRes  = await fetch(`/api/getcourse/name/${courseName}`);
+            const courseCT   = courseRes.headers.get('content-type');
+            if (!courseCT || !courseCT.includes('application/json')) continue; // session expired mid-render
             const courseData = await courseRes.json();
             if (courseData.error) continue;
 
-            const imgRes = await fetch(window.location.origin + `/api/youtubethumb/${courseData.playlist}`);
-            const imgData = await imgRes.json();
+            let imgSrc = '';
+            try {
+                const imgRes  = await fetch(window.location.origin + `/api/youtubethumb/${courseData.playlist}`);
+                const imgCT   = imgRes.headers.get('content-type');
+                if (imgCT && imgCT.includes('application/json')) {
+                    const imgData = await imgRes.json();
+                    imgSrc = imgData.img || '';
+                }
+            } catch (_) {} // thumbnail is cosmetic — never block course render
 
             const courseCard = document.createElement('div');
             courseCard.classList.add('dashboard-course-card');
             courseCard.innerHTML = `
-                <img src="${imgData.img || ''}" alt="${courseName}" />
+                <img src="${imgSrc}" alt="${courseName}" />
                 <h2>${courseName}</h2>
                 <p>${courseData.description}</p>
                 <div class="course-progress">
@@ -636,6 +661,12 @@ async function getWeatherByCoords(lat, lon) {
     weatherDiv.innerHTML = '<p style="color:#888">⏳ Fetching weather...</p>';
     try {
         const wres = await fetch(window.location.origin + `/api/openweather/${lat}/${lon}`);
+        
+        const contentType = wres.headers.get("content-type");
+        if (!contentType || !contentType.includes("application/json")) {
+            throw new Error("Server did not return JSON. Your session may have expired.");
+        }
+        
         const data = await wres.json();
         _lastWeatherData = { ...data, lat, lon };
 
@@ -754,8 +785,15 @@ async function searchYouTube() {
 
     try {
         const res  = await fetch(`/api/gemini/youtube?q=${encodeURIComponent(query)}`, {
-            headers: geminiHeaders()
+            headers: { 'x-gemini-key': getGeminiKey() || '' }
         });
+
+        const contentType = res.headers.get("content-type");
+        if (!contentType || !contentType.includes("application/json")) {
+            results.innerHTML = '<p style="color:#c00">Session expired. Please refresh the page and sign in again.</p>';
+            return;
+        }
+
         const data = await res.json();
 
         if (data.error) {
@@ -801,7 +839,7 @@ function validate() {
                 await sendmail(name.value, email.value, msg.value);
                 success(); // only fires if emailjs.send resolves
             } catch (err) {
-                swal({ title: 'Send Failed', text: 'Could not send email. Please try again.', icon: 'error' });
+                alert('Send Failed — Could not send email. Please try again.');
             }
         }
     });
@@ -814,21 +852,11 @@ function sendmail(name, email, msg) {
         message:   msg,
     });
 }
-function emptyerror()
-{
-    swal({
-        title: "Complete All The Sections",
-        text: "Fields cant be empty",
-        icon: "error",
-      });
+function emptyerror() {
+    alert("Complete All The Sections — Fields can't be empty.");
 }
-function success()
-{
-    swal({
-        title: "Email Sent Succesfully",
-        text: "We will Try To Rspond In 24 Hours",
-        icon: "success",
-      });
+function success() {
+    alert("Email Sent Successfully! We will try to respond within 24 hours.");
 }
 
 async function logout() {
@@ -839,6 +867,8 @@ async function logout() {
 // course js @Rouvik Maji
 async function listCourses() {
     const res = await fetch('/api/getcourses');
+    const ct  = res.headers.get('content-type');
+    if (!ct || !ct.includes('application/json')) return; // session expired — silently bail
     const data = await res.json();
     if (data.error) return;
     const courseList = document.querySelector('.courses-grid');
@@ -880,8 +910,14 @@ async function courseHandler(button) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ courseName: button.dataset.coursename })
         });
-        const data = await res.json();
-        if (data.error) console.warn("Enroll note:", data.error);
+        
+        const contentType = res.headers.get("content-type");
+        if (contentType && contentType.includes("application/json")) {
+            const data = await res.json();
+            if (data.error) console.warn("Enroll note:", data.error);
+        } else {
+            console.warn("Enrollment failed: Server did not return JSON. You may need to sign in again.");
+        }
     } catch (err) {
         console.warn("Could not enroll:", err);
     }

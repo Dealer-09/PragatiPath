@@ -25,8 +25,6 @@
     "@clerk/express": "^1.4.2",
     "@google/generative-ai": "^0.24.0",
     "@litertjs/core": "^2.5.2",
-    "cookie-session": "^2.1.0",
-    "dotenv": "^16.4.7",
     "express": "^5.1.0",
     "lru-cache": "^11.1.0",
     "mongoose": "^8.13.2"

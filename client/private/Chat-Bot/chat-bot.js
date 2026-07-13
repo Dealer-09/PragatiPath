@@ -34,6 +34,11 @@ async function sendChatMessage() {
             },
             body: JSON.stringify({ query })
         });
+        const ct   = res.headers.get('content-type');
+        if (!ct || !ct.includes('application/json')) {
+            botDiv.innerHTML = "⚠️ Session expired. Please <a href='/public/Accounts/signin.html'>sign in again</a>.";
+            return;
+        }
         const data = await res.json();
         if (data.error && data.error.includes('No Gemini API key')) {
             botDiv.innerHTML = "⚠️ No Gemini API key set. Go to the dashboard and click <b>🔑 API Key</b> to add yours.";

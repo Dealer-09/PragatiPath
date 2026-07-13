@@ -1690,9 +1690,12 @@ body>.skiptranslate>iframe.skiptranslate {
     padding: 28px 32px;
     width: min(420px, 92vw);
     box-shadow: 0 20px 60px rgba(0,0,0,0.25);
-    display: flex;
     flex-direction: column;
     gap: 14px;
+}
+
+#key-modal[open] {
+    display: flex;
 }
 
 #key-modal::backdrop {
