@@ -17,8 +17,12 @@ desktop.ini
 package-lock.json
 
 # ── ML model files — large binaries, not for git ─────────────────────────────
-# TFLite model (22 MB) — generate via scripts/colab_convert_to_tflite.py
-client/public/assets/plant-disease-vit/model.tflite
+# TFLite model (15-30 MB) — generated via kaggle scripts
+*.tflite
+master_dict.json
+
+# Scratch directories
+scratch/
 
 # ONNX model (5.76 MB) — download via scripts/download_model.py or HuggingFace
 # Keep this tracked so the app works out-of-the-box (uncomment to ignore):

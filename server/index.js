@@ -1,5 +1,4 @@
-// custom modules
-const { connectDB, UserDB, CourseDB } = require('./DBHandler.js');
+const { connectDB, Users, Courses, middleware_userAuth, endpoint_userInfo, endpoint_addCourse, endpoint_removeCourse, endpoint_updateCourseProgress, endpoint_getCourseList, endpoint_getCourseByName, endpoint_getCourseById } = require('./DBHandler.js');
 const { endpoint_getChannelInfo, endpoint_youtubePlaylistImg, endpoint_geminiYoutubeSearch, endpoint_openWeatherAPI, endpoint_chatbot } = require('./aiSearch.js');
 
 // express
@@ -21,11 +20,10 @@ app.use(clerk.clerkMiddleware());
 // database connection — awaited so server only starts after DB is ready
 connectDB(process.env.MONGO_URI);
 
-const userDBHandler   = new UserDB();
-const courseDBHandler = new CourseDB();
+// Instantiations removed as classes were flattened
 
 // WASM headers — scoped to WASM asset paths only (global COEP breaks Clerk auth)
-app.use(['/public/assets/litert-wasm', '/public/assets/plant-disease-vit'], (req, res, next) => {
+app.use(['/public/assets/litert-wasm', '/public/assets/plant-disease-mobilenet'], (req, res, next) => {
     res.setHeader('Cross-Origin-Opener-Policy',   'same-origin');
     res.setHeader('Cross-Origin-Embedder-Policy', 'require-corp');
     res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
@@ -44,7 +42,7 @@ app.get('/', (req, res) => res.redirect('/public/LandingPage/index.html'));
 // private static (auth-gated)
 app.use('/private',
     clerk.requireAuth({ signInUrl: process.env.CLERK_SIGN_IN_URL, signUpUrl: process.env.CLERK_SIGN_UP_URL }),
-    userDBHandler.middleware_userAuth.bind(userDBHandler),
+    middleware_userAuth,
     express.static('client/private')
 );
 
@@ -60,15 +58,15 @@ app.get('/private/logout', clerk.requireAuth(), async (req, res) => {
 });
 
 // ── User API (all require auth) ───────────────────────────────────────────────
-app.get('/api/userinfo',       clerk.requireAuth(), userDBHandler.endpoint_userInfo.bind(userDBHandler));
-app.post('/api/updcourseprog', clerk.requireAuth(), express.json(), userDBHandler.endpoint_updateCourseProgress.bind(userDBHandler));
-app.post('/api/addcourse',     clerk.requireAuth(), express.json(), userDBHandler.endpoint_addCourse.bind(userDBHandler));
-app.post('/api/removecourse',  clerk.requireAuth(), express.json(), userDBHandler.endpoint_removeCourse.bind(userDBHandler));
+app.get('/api/userinfo',       clerk.requireAuth(), endpoint_userInfo);
+app.post('/api/updcourseprog', clerk.requireAuth(), express.json(), endpoint_updateCourseProgress);
+app.post('/api/addcourse',     clerk.requireAuth(), express.json(), endpoint_addCourse);
+app.post('/api/removecourse',  clerk.requireAuth(), express.json(), endpoint_removeCourse);
 
 // ── Course API (all require auth) ─────────────────────────────────────────────
-app.get('/api/getcourses',                clerk.requireAuth(), courseDBHandler.endpoint_getCourseList.bind(courseDBHandler));
-app.get('/api/getcourse/name/:courseName', clerk.requireAuth(), courseDBHandler.endpoint_getCourseByName.bind(courseDBHandler));
-app.get('/api/getcourse/id/:courseId',     clerk.requireAuth(), courseDBHandler.endpoint_getCourseById.bind(courseDBHandler));
+app.get('/api/getcourses',                clerk.requireAuth(), endpoint_getCourseList);
+app.get('/api/getcourse/name/:courseName', clerk.requireAuth(), endpoint_getCourseByName);
+app.get('/api/getcourse/id/:courseId',     clerk.requireAuth(), endpoint_getCourseById);
 
 // ── Gemini / AI API (all require auth) ───────────────────────────────────────
 app.get('/api/gemini/youtube',  clerk.requireAuth(), endpoint_geminiYoutubeSearch);

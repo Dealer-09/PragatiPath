@@ -468,9 +468,9 @@ navLinks.forEach(link => {
 });
 
 
-//ai-toolkit js ── Plant Disease Detection (dual-mode)
+//ai-toolkit js ── Plant Disease Detection
 // Primary:  Gemini Vision  (when X-Gemini-Key is set)
-// Fallback: ViT-tiny ONNX  (wambugu71/crop_leaf_diseases_vit, INT8 quantized, ~5MB)
+// Fallback: MobileNetV3-Large (94-class, LiteRT WebGPU)
 // ─────────────────────────────────────────────────────
 
 const plantUpload       = document.getElementById('upload');
@@ -486,7 +486,7 @@ function setPlantModeBadge() {
         plantModeBadge.textContent = '✨ Gemini Vision';
         plantModeBadge.className = 'plant-mode-badge gemini';
     } else {
-        plantModeBadge.textContent = '📴 Offline ViT';
+        plantModeBadge.textContent = '📴 Offline MobileNet';
         plantModeBadge.className = 'plant-mode-badge offline';
     }
 }
@@ -543,8 +543,8 @@ function renderOfflineResult(top5, backend, inferMs) {
         predictionText.innerHTML = `
             <div class="plant-result">
                 <p style="color:#888">Image doesn't appear to be a crop leaf.<br>
-                Please take a close-up photo of a single leaf (Corn, Potato, Rice, or Wheat).</p>
-                <p class="plant-result-source">Offline ViT</p>
+                Please take a close-up photo of a single leaf.</p>
+                <p class="plant-result-source">Offline MobileNet</p>
             </div>`;
         return;
     }
@@ -554,18 +554,20 @@ function renderOfflineResult(top5, backend, inferMs) {
         predictionText.innerHTML = `
             <div class="plant-result">
                 <p style="color:#888">Low confidence (${confidence}%) — try a clearer close-up in good lighting.</p>
-                <p class="plant-result-source">Offline ViT · Set a Gemini key for smarter results on any crop</p>
+                <p class="plant-result-source">Offline MobileNet · Set a Gemini key for smarter results</p>
             </div>`;
         return;
     }
 
-    // Parse "Crop___Condition" format
+    // The new 128-class Master Dictionary provides space-separated strings (e.g. "Apple Rust Leaf")
     const parseLabel = (raw) => {
-        const parts   = (raw || '').split('___');
-        const crop    = (parts[0] || 'Unknown').replace(/_/g, ' ');
-        const disease = (parts[1] || 'Unknown').replace(/_/g, ' ');
-        const healthy = disease.toLowerCase() === 'healthy';
-        return { crop, disease, healthy };
+        const full = (raw || 'Unknown').replace(/_/g, ' ').replace(/\s+/g, ' ').trim();
+        const healthy = full.toLowerCase().includes('healthy') || full.toLowerCase().includes('normal');
+        return { 
+            crop: full, 
+            disease: healthy ? 'Healthy' : 'Detected', 
+            healthy 
+        };
     };
 
     const { crop, disease, healthy } = parseLabel(best.label);
@@ -594,7 +596,7 @@ function renderOfflineResult(top5, backend, inferMs) {
                 <span class="plant-value">${confidence}%</span>
             </div>
             ${altRows ? `<div class="plant-result-section"><strong>Other possibilities</strong><p>${altRows}</p></div>` : ''}
-            <p class="plant-result-source">${{'litert-webgpu':'⚡ LiteRT WebGPU','litert-wasm':'🔵 LiteRT WASM','ort':'🟡 onnxruntime-web'}[backend] || backend} · ${inferMs}ms · Corn/Potato/Rice/Wheat · Set a Gemini key for any crop</p>
+            <p class="plant-result-source">${{'litert-webgpu':'⚡ LiteRT WebGPU','litert-wasm':'🔵 LiteRT WASM'}[backend] || backend} · ${inferMs}ms · Set a Gemini key for detailed treatments</p>
         </div>`;
 }
 
@@ -627,6 +629,10 @@ async function analyzeImage(file) {
                 },
                 body: JSON.stringify({ imageBase64: base64, mimeType: file.type || 'image/jpeg' })
             });
+            const contentType = res.headers.get("content-type");
+            if (!contentType || !contentType.includes("application/json")) {
+                throw new Error("Session expired. Please refresh the page to sign in again.");
+            }
             const data = await res.json();
             if (data.error) throw new Error(data.error);
             renderGeminiResult(data);
@@ -642,7 +648,7 @@ async function analyzeImage(file) {
                 else plantImg.onload = resolve;
             });
 
-            const { top5, backend, inferMs } = await PlantViT.predict(plantImg, (msg) => {
+            const { top5, backend, inferMs } = await PlantAI.predict(plantImg, (msg) => {
                 predictionText.innerHTML = `<p style="color:#888">⏳ ${msg}</p>`;
             });
             renderOfflineResult(top5, backend, inferMs);

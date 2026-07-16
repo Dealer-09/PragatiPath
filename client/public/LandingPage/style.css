@@ -1009,7 +1009,29 @@ main {
     }
 }
 
+@media (max-width: 900px) {
+    .logIN-btn {
+        display: none !important;
+    }
+    .signUP-btn {
+        font-size: 0;
+    }
+    .signUP-btn::after {
+        content: "Get started";
+        font-size: 1rem;
+    }
+}
+
 @media (max-width: 400px) {
+
+    .logo {
+        font-size: 0 !important;
+    }
+    .logo::after {
+        content: "PP";
+        font-size: 1.4em;
+        color: green;
+    }
 
     .hero-text img {
         width: 80%;

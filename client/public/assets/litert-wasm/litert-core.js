@@ -1069,7 +1069,7 @@ var LiteRt = class {
 };
 
 // src/load.ts
-import { createWasmLib } from "@litertjs/wasm-utils";
+import { createWasmLib } from "./litert-wasm-utils.js";
 
 // src/url_path_utils.ts
 function pathToString(path) {

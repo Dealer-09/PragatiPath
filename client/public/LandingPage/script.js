@@ -1,32 +1,5 @@
-function updateLoginButtonText() {
-    const loginButton = document.querySelector(".logIN-btn");
-    const button = document.querySelector(".signUP-btn");
-    const mediaQuery = window.matchMedia("(max-width: 900px)");
+// Window resize listeners removed (moved to CSS media queries)
 
-    if (mediaQuery.matches) {
-        button.textContent = "Get started";
-        loginButton.style.display = "none";
-    } else {
-        button.textContent = "Sign up";
-        loginButton.style.display = "inline-block";
-    }
-}
-
-updateLoginButtonText();
-window.addEventListener("resize", updateLoginButtonText);
-
-window.addEventListener("resize", () => {
-    const logo = document.querySelector(".logo");
-    const mediaQuery = window.matchMedia("(max-width: 400px)");
-
-    if (mediaQuery.matches) {
-        logo.textContent = "PP";
-        logo.style.color = "green";
-    } else {
-        logo.textContent = "PragatiPath";
-        logo.style.color = "#191923";
-    }
-})
 
 function toggleFAQ(element) {
     const faq = element.parentElement;

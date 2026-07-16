@@ -1,244 +1,85 @@
 # PragatiPath — Plant Disease AI: How It Works
 
-> Old system → Fallback system → Current System (LiteRT WebGPU)
+> **Current System (V2):** MobileNetV3-Large trained on a 128-class unified dataset (PlantVillage + PlantDoc + BD), running entirely offline via LiteRT WebGPU.
 
 ---
 
-## 🔴 Old System — TF.js MobileNetV1
+## ⚡ The Clever Hans Problem (V1 Iteration)
 
-The app previously used **TensorFlow.js MobileNetV1** — a generic image classifier
-that was never trained on plant diseases.
+Our initial **V1 Model** (a Vision Transformer / ViT-tiny trained solely on the PlantVillage dataset) suffered from a catastrophic failure known as the **"Clever Hans" effect**. 
 
-```
+The PlantVillage dataset primarily consists of leaves photographed on perfectly flat, solid-color backgrounds in a laboratory setting. When we tested the V1 model on real-world smartphone photos containing dirt, grass, or human fingers in the background, the model **hallucinated**. It had learned to predict diseases based on the background lighting and color rather than the microscopic texture of the leaf itself.
+
+---
+
+## 🧬 Building the "Beast" Model (V2 Iteration)
+
+To cure the Clever Hans bias, we threw out the V1 architecture and completely re-engineered the ML pipeline. We trained a new model across multiple Kaggle T4 GPUs using a 3-Dataset Fusion strategy:
+
+1. **PlantVillage:** (High volume, clean lab data)
+2. **PlantDoc:** (Noisy, real-world smartphone photos with messy backgrounds)
+3. **Bangladesh Crop Dataset:** (Localized South-Asian crop varieties)
+
+### Solving "Label Collision"
+Merging 3 disparate datasets normally corrupts the neural network because of "Label Collisions" (e.g., ID 5 means "Apple Rust" in Dataset A, but "Tomato Blight" in Dataset B). We wrote a Python ETL pipeline that recursively parsed all 3 HuggingFace repositories and automatically built a mathematically perfect **128-Class Master Dictionary** (`master_dict.json`) to unify the tensors.
+
+### The Architecture: MobileNetV3
+We migrated from ViT-tiny to **MobileNetV3-Large**. While ViT is powerful, MobileNet is inherently designed for mobile devices. We compiled the model specifically for **WebGPU inference** by mathematically locking the tensor batch size to `1` and preserving pure `Float32` precision.
+
+---
+
+## ⚙️ Infrastructure & Runtime Cascade
+
+Rather than relying on a single runtime that might fail on older devices, the MobileNetV3 architecture uses a robust execution cascade natively built into the web app:
+
+```text
 User uploads leaf
        ↓
-TF.js loads 13 separate .bin shard files (~13 MB total, slow)
+PlantAI.predict() initializes liteRtModule
        ↓
-MobileNetV1 runs on CPU
-(trained on ImageNet — cats, dogs, cars, not plants)
+┌────────────────────────────────────────────────────────────┐
+│ 1. Primary Runtime: WebGPU Accelerator                     │
+│    Executes model.tflite via native GPU shards.            │
+│    Latency: ~30ms (Chrome 113+, Edge)                      │
+└────────────────────────────────────────────────────────────┘
+       ↓ (If WebGPU is unsupported or crashes)
+┌────────────────────────────────────────────────────────────┐
+│ 2. Fallback Runtime: WASM CPU                              │
+│    Runs purely on CPU threads via WebAssembly.             │
+│    Latency: ~120ms (Universally compatible)                │
+└────────────────────────────────────────────────────────────┘
        ↓
-Outputs a generic ImageNet label like "broccoli" or "daisy"
-       ↓
-Result: wrong label, no disease name, no treatment, low accuracy
+Outputs 128-class Softmax
 ```
-
-**Problems:**
-- Wrong model entirely — not trained on crop diseases
-- Slow first load (13 separate network requests)
-- No disease names, no confidence, no treatment advice
-- Not reliably offline — depends on CDN for model shards
-
----
-
-## 🟡 Fallback System — ViT-tiny + onnxruntime-web
-
-```
-User uploads leaf
-       ↓
-PlantViT.predict() is called
-       ↓
-onnxruntime-web loads model_quantized.onnx
-(5.76 MB, single file, fully cached after first load)
-       ↓
-Image resized to 224×224px → normalised to [-1.0, +1.0] float values
-Arranged as Float32 tensor: [1, 3, 224, 224]
-(batch=1, RGB channels=3, height=224, width=224)
-       ↓
-ViT-tiny runs inference via WASM on CPU
-Vision Transformer reads the image in 16×16 pixel patches
-(like reading words in a sentence — each patch is a "word")
-       ↓
-Outputs 13 raw scores (logits) → softmax → probabilities
-       ↓
-Top-5 results: { label, confidence }
-       ↓
-┌─────────────────────────────────────────────┐
-│ Gemini API key set?                         │
-│  YES → image sent to Gemini Vision          │
-│         → crop, disease, severity,          │
-│            treatment, prevention returned   │
-│  NO  → offline ViT-tiny result shown only   │
-└─────────────────────────────────────────────┘
-```
-
-### 13 classes the model knows
-
-| Crop    | Diseases Covered                                      |
-|---------|-------------------------------------------------------|
-| Corn    | Blight, Common Rust, Gray Leaf Spot, Healthy          |
-| Potato  | Early Blight, Late Blight, Healthy                    |
-| Rice    | Brown Spot, Hispa, Leaf Blast                         |
-| Wheat   | Brown Rust, Yellow Rust, Healthy                      |
-
----
-
-## ⚡ Current System — LiteRT.js + WebGPU (model.tflite)
-
-```
-User uploads leaf
-       ↓
-PlantViT.predict() → model.tflite EXISTS → use LiteRT.js
-       ↓
-LiteRT.js initialises (Google's C++ inference engine, compiled to WASM)
-       ↓
-┌──────────────────────────────────────────────┐
-│  WebGPU available? (Chrome 113+, Edge, Arc)  │
-│  YES → GPU accelerator (phone/laptop GPU)    │
-│  NO  → LiteRT WASM CPU(still faster than ort)│
-└──────────────────────────────────────────────┘
-       ↓
-Image preprocessed → Tensor (Int32Array shape, required by C++ runtime)
-       ↓
-compiledModel.run([tensor]) → Promise<Tensor[]>
-await outputs[0].data()     → Float32Array (13 logits)
-C++ objects freed: tensor.delete() — no WASM heap leaks
-       ↓
-Softmax → top-5 results
-Footer shows: ⚡ LiteRT WebGPU · 23ms
-```
-
-> Same ViT-tiny weights, same 13 classes, same accuracy.
-> Only the **runtime that executes the maths** changes.
-
----
-
-## 📊 Comparison
-
-| | Old (TF.js MobileNet) | Fallback (ORT + ONNX) | Current (LiteRT + TFLite) |
-|---|---|---|---|
-| **Model** | MobileNetV1 (wrong task) | ViT-tiny (crop diseases) | ViT-tiny (crop diseases) |
-| **File size** | 13 MB in 13 files | 5.76 MB, 1 file | ~10 MB, 1 file |
-| **Accuracy** | ~30% (ImageNet labels) | ~98% | ~98% |
-| **Runtime** | TensorFlow.js (pure JS) | onnxruntime-web (WASM) | LiteRT.js (C++ native) |
-| **GPU** | ❌ | ❌ | ✅ WebGPU |
-| **Inference speed** | ~800 ms | ~200–400 ms | ~20–50 ms (GPU) |
-| **Fully offline** | Partial | ✅ Full | ✅ Full |
-| **Disease-aware** | ❌ | ✅ | ✅ |
-| **Treatment advice** | ❌ | ✅ (Gemini, BYOK) | ✅ (Gemini, BYOK) |
-
----
-
-## 🧪 What the Colab Script Does — Cell by Cell
-
-### Cell 1 — Install dependencies
-```python
-pip install ai-edge-torch transformers torch huggingface_hub
-```
-Installs `ai-edge-torch` — Google's official tool to convert PyTorch
-models into TFLite format.
-
-**Why Colab and not your machine?**
-`ai-edge-torch` requires Python 3.9–3.12.
-Your machine runs Python 3.13 — incompatible.
-Colab runs Python 3.10 — works perfectly.
-
----
-
-### Cell 2 — Load the model from HuggingFace
-```python
-model = ViTForImageClassification.from_pretrained("wambugu71/crop_leaf_diseases_vit")
-model.eval()
-```
-Downloads the ViT-tiny model weights from HuggingFace.
-Runs a dummy forward pass to confirm it loads correctly.
-
----
-
-### Cell 3 — Convert to TFLite
-```python
-edge_model = ai_edge_torch.convert(model, sample_inputs)
-```
-This is the core step. Under the hood:
-
-1. **`torch.export()`** traces the entire model with a sample input,
-   recording every mathematical operation in order
-2. The trace is converted to **XLA** (Google's accelerator graph format —
-   the same format used in TPUs and Android phones)
-3. XLA compiles to a **TFLite flatbuffer** — a compact binary file that
-   the C++ LiteRT runtime reads directly without any Python
-
----
-
-### Cell 4 — Save and verify
-```python
-edge_model.export("model.tflite")
-```
-Saves the binary flatbuffer to disk.
-
-Then loads it back with TensorFlow's own Lite interpreter to:
-- Confirm input shape: `[1, 3, 224, 224]` float32
-- Confirm output shape: `[1, 13]` float32
-- Run one real inference to prove the file is valid
-
----
-
-### Cell 5 — Download
-```python
-from google.colab import files
-files.download("model.tflite")
-```
-Colab's `files.download()` streams the file directly to your browser's
-download folder — same as clicking a download link.
-
----
 
 ## 🗂 File Placement
 
-```
+```text
 PragatiPath/
-└── client/public/assets/plant-disease-vit/
-    ├── model_quantized.onnx      ← already here (ort fallback, 5.76 MB)
-    ├── model.tflite              ← DROP HERE after Colab (~10 MB)
-    ├── class_labels.json         ← already here
-    └── preprocessor_config.json  ← already here
-```
-
-No code changes needed. The app checks for `model.tflite` on every load:
-- **Present** → LiteRT.js activates → WebGPU if browser supports it
-- **Missing** → onnxruntime-web fallback → still fully functional
-
----
-
-## 🔁 Runtime Decision Flow
-
-```
-Page loads
-    │
-    ├── HEAD /public/assets/plant-disease-vit/model.tflite
-    │       │
-    │    200 OK?
-    │       │
-    │      YES ──→ loadLiteRT()
-    │               │
-    │               ├── navigator.gpu?
-    │               │       YES → accelerator = 'webgpu'   ⚡ fastest
-    │               │       NO  → accelerator = 'wasm'     🔵 fast
-    │               │
-    │               └── loadAndCompile(url, { accelerator })
-    │                         → CompiledModel
-    │
-    └── NO / fail ──→ loadORT()
-                       → ort.InferenceSession (model_quantized.onnx)
-                       → 🟡 always works
+└── client/public/assets/plant-disease-mobilenet/
+    ├── model.tflite              ← Primary Offline model (15 MB)
+    ├── class_labels.json         ← 128-class unified mapping
+    ├── infer.js                  ← The cascade logic script
 ```
 
 ---
 
-## Runtime Stack Comparison
+## 🚀 The Hybrid Deployment Strategy
 
-```
-LiteRT.js WebGPU
-    litert-core.js                (JS glue, 46 KB)
-    litert_wasm_internal.js       (WASM loader, 265 KB)
-    litert_wasm_internal.wasm     (C++ engine, 8.6 MB)
-    model.tflite                  (weights, ~10 MB)
-    → Inference runs on your GPU
+The fundamental trade-off of AI is that **Offline Models are bounded** by their training data. Our 128-class MobileNet is blazing fast and free, but if a farmer uploads a crop not in our dataset (like a Cucumber), it is mathematically forced to guess incorrectly or throw a Low Confidence warning.
 
-onnxruntime-web WASM
-    ort.min.js                    (loaded from CDN)
-    model_quantized.onnx          (weights + graph, 5.76 MB)
-    → Inference runs on CPU via WASM threads
-```
+To solve this, PragatiPath uses a **Hybrid Architecture**:
 
-LiteRT is the same engine that runs AI on **Android phones** and **Google's TPUs** —
-compiled to WASM so it runs in the browser with no installation required.
+1. **First Line of Defense (Offline MobileNet):** The browser uses LiteRT.js to run the `.tflite` model locally. It requires zero internet connection and provides instant triage.
+2. **The Cloud Escalation (Gemini Vision):** If the offline model yields Low Confidence, the farmer can escalate the photo to Google Gemini 2.5 (using a BYOK architecture), which has an infinite vocabulary to diagnose obscure pests.
+
+---
+
+## 🛠 Future Roadmap (V3 Improvements)
+
+To push the offline model even closer to Gemini's accuracy, future iterations can implement:
+
+1. **Vocabulary Expansion:** Ingest more diverse datasets (e.g., iNaturalist, specialized pest datasets) and map them into the `master_dict.json` to push the boundary from 128 classes to 300+ classes.
+2. **Heavier Architectures:** Upgrade the Kaggle script from MobileNetV3 to **EfficientNetB3** or **ResNet50**. This trades file size (15MB -> 50MB) and latency for much deeper visual reasoning.
+3. **Aggressive Data Augmentation:** Introduce `RandomRotation` and `RandomZoom` layers during the Kaggle training loop to artificially simulate strange smartphone camera angles and harsh sunlight.
+4. **YOLO Object Detection:** Instead of full-image classification, train a YOLOv8 model to strictly draw bounding boxes over the diseased spots, completely bypassing background noise entirely.

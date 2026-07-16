@@ -8,7 +8,7 @@ PRAGATI PATH is a full-stack web platform designed to assist Indian farmers by l
 - 🌱 **Crop Recommendation System** based on user location and weather data
 - 🦠 **Plant Disease Detection** (Dual Mode)
   - **Primary:** Gemini Vision (Analyzes any crop, provides treatment/prevention)
-  - **Fallback:** Offline ViT-tiny running natively in-browser via **LiteRT WebGPU** (Fast, private, works offline)
+  - **Fallback:** Offline MobileNetV3-Large (128 unified classes) running natively in-browser via **LiteRT WebGPU** (Fast, private, works offline)
 - 📺 **YouTube Learning Module** — fetches top relevant videos and allows tracking course progress
 - 🔐 Secure login and protected routes using **Clerk** authentication
 - 🔑 **BYOK Architecture (Bring Your Own Key)** — Gemini API keys are securely provided by users and stored only in their local browser storage, ensuring free hosting and no central API cost.
@@ -111,7 +111,7 @@ The app will be running at `http://localhost:8080`.
 /client               # Frontend (Public Landing, Private Dashboard)
 /server               # Express API routes, Auth middleware, Database schemas
 /docs                 # Technical documentation
-/scripts              # AI Model conversion utilities
+/scripts              # AI Model kaggle scripts, dataset dictionary generators
 ```
 
 ## 👨‍💻 Authors
