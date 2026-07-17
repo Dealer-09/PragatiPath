@@ -573,6 +573,14 @@ async function loadForumPosts(force = false) {
     feed.innerHTML = '<p style="color:#888; text-align:center;">⏳ Loading discussions...</p>';
     try {
         const res = await fetch('/api/forum/posts', { credentials: 'same-origin' });
+        
+        // Prevent JSON parse crash if Clerk redirects to the HTML login page
+        const contentType = res.headers.get('content-type');
+        if (!contentType || !contentType.includes('application/json')) {
+            window.location.href = '../Accounts/signin.html';
+            return;
+        }
+
         const posts = await res.json();
         if (!Array.isArray(posts) || posts.length === 0) {
             feed.innerHTML = '<p style="color:#888; text-align:center;">🌱 No discussions yet. Be the first to post!</p>';
