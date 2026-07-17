@@ -211,8 +211,18 @@ async function endpoint_getAgronomyData(req, res) {
             fetch(meteoUrl)
         ]);
 
-        const soilData = await soilRes.json();
-        const meteoData = await meteoRes.json();
+        // Safely parse JSON, handling potential API failures or empty responses
+        let soilData = {};
+        if (soilRes.ok && soilRes.status !== 204) {
+            const text = await soilRes.text();
+            try { soilData = JSON.parse(text); } catch (e) {}
+        }
+        
+        let meteoData = {};
+        if (meteoRes.ok && meteoRes.status !== 204) {
+            const text = await meteoRes.text();
+            try { meteoData = JSON.parse(text); } catch (e) {}
+        }
 
         // Extract and simplify soil data
         const soilProps = {};
