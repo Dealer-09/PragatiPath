@@ -26,7 +26,7 @@
     "@google/generative-ai": "^0.24.0",
     "@litertjs/core": "^2.5.2",
     "express": "^5.1.0",
-    "lru-cache": "^11.1.0",
+    "lru-cache": "^11.5.2",
     "mongoose": "^8.13.2"
   }
 }

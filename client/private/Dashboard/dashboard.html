@@ -384,6 +384,7 @@
             <div class="community-tabs">
                 <button class="comm-tab active" id="tab-mandi" onclick="showCommTab('mandi')">📊 Live Mandi Prices</button>
                 <button class="comm-tab" id="tab-forum" onclick="showCommTab('forum')">💬 Krishi Charcha</button>
+                <button class="comm-tab" id="tab-schemes" onclick="showCommTab('schemes')">🏛️ Govt Schemes</button>
             </div>
 
             <!-- Mandi Sub-page -->
@@ -426,6 +427,46 @@
                     <!-- Posts Feed -->
                     <div id="forum-feed">
                         <p style="color:#888; text-align:center;">⏳ Loading discussions...</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Government Schemes Sub-page -->
+            <div id="comm-schemes" class="comm-page" style="display:none;">
+                <div style="max-width:900px; margin:0 auto; padding:0 20px 40px;">
+
+                    <!-- AI Eligibility Check Panel -->
+                    <div class="card" id="schemes-eligibility-card" style="max-height:none; margin-bottom:24px; background: linear-gradient(135deg, #f0fdf4, #fefae0); border: 1.5px solid #4caf50;">
+                        <h2 style="margin-top:0; color:#1b5e20;">✨ AI Eligibility Check</h2>
+                        <p style="font-size:0.85rem; color:#555; margin:0 0 16px;">Let Gemini analyze your profile and tell you which schemes you should prioritize applying for.</p>
+                        <div style="display:flex; flex-wrap:wrap; gap:12px; margin-bottom:16px;">
+                            <div style="flex:1; min-width:180px;">
+                                <label style="font-size:0.8rem; color:#555; display:block; margin-bottom:4px;">Land Ownership</label>
+                                <select id="scheme-land" style="width:100%; padding:8px 12px; border-radius:8px; border:1.5px solid #c8e6c9; font-size:0.9rem; background:#fff;">
+                                    <option value="Owner">I own the land</option>
+                                    <option value="Tenant">I am a tenant/sharecropper</option>
+                                    <option value="SHG">Self-Help Group / JLG</option>
+                                </select>
+                            </div>
+                            <div style="flex:1; min-width:180px;">
+                                <label style="font-size:0.8rem; color:#555; display:block; margin-bottom:4px;">Crops Grown</label>
+                                <input id="scheme-crops" type="text" placeholder="e.g. Rice, Wheat, Cotton" style="width:100%; padding:8px 12px; border-radius:8px; border:1.5px solid #c8e6c9; font-size:0.9rem; box-sizing:border-box;">
+                            </div>
+                            <div style="flex:1; min-width:140px;">
+                                <label style="font-size:0.8rem; color:#555; display:block; margin-bottom:4px;">Have KCC / Crop Loan?</label>
+                                <select id="scheme-loanee" style="width:100%; padding:8px 12px; border-radius:8px; border:1.5px solid #c8e6c9; font-size:0.9rem; background:#fff;">
+                                    <option value="no">No</option>
+                                    <option value="yes">Yes</option>
+                                </select>
+                            </div>
+                        </div>
+                        <button onclick="checkSchemeEligibility()" id="scheme-check-btn" style="padding:10px 24px; background:#2e7d32; color:white; border:none; border-radius:8px; font-size:0.95rem; cursor:pointer; font-weight:600;">🤖 Check My Eligibility</button>
+                        <div id="scheme-eligibility-result" style="margin-top:16px;"></div>
+                    </div>
+
+                    <!-- Scheme Cards Grid -->
+                    <div id="schemes-feed" style="display:grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap:20px;">
+                        <p style="color:#888; text-align:center; grid-column:1/-1;">⏳ Loading schemes...</p>
                     </div>
                 </div>
             </div>

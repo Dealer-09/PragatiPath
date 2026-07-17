@@ -36,6 +36,12 @@ async function fetchCourseData() {
     const response = await fetch(window.location.origin + `/api/getcourse/name/${encodeURIComponent(name)}`, {
         credentials: 'same-origin'
     });
+    // Guard: Clerk returns HTML when session expires — .json() on it crashes
+    const ct = response.headers.get('content-type');
+    if (!ct || !ct.includes('application/json')) {
+        window.location.href = window.location.origin + '/public/Accounts/signin.html';
+        return;
+    }
     const data = await response.json();
     if (data.error) {
         window.location.href = window.location.origin + '/private/Dashboard/dashboard.html';

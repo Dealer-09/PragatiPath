@@ -1,5 +1,5 @@
 const { connectDB, Users, Courses, middleware_userAuth, endpoint_userInfo, endpoint_saveLocation, endpoint_addCourse, endpoint_removeCourse, endpoint_updateCourseProgress, endpoint_getCourseList, endpoint_getCourseByName, endpoint_createForumPost, endpoint_getForumPosts, endpoint_likeForumPost } = require('./DBHandler.js');
-const { endpoint_getChannelInfo, endpoint_youtubePlaylistImg, endpoint_geminiYoutubeSearch, endpoint_openWeatherAPI, endpoint_chatbot, endpoint_getAgronomyData, endpoint_geminiAgronomyIntelligence, endpoint_getMandiPrices } = require('./aiSearch.js');
+const { endpoint_getChannelInfo, endpoint_youtubePlaylistImg, endpoint_geminiYoutubeSearch, endpoint_openWeatherAPI, endpoint_chatbot, endpoint_getAgronomyData, endpoint_geminiAgronomyIntelligence, endpoint_getMandiPrices, endpoint_getSchemes, endpoint_checkSchemeEligibility } = require('./aiSearch.js');
 
 // express
 const express = require('express');
@@ -143,6 +143,10 @@ app.get('/api/agronomy/:lat/:lon',            clerk.requireAuth(), endpoint_getA
 app.get('/api/mandi/:lat/:lon',               clerk.requireAuth(), endpoint_getMandiPrices);
 app.get('/api/youtubethumb/:playlist',        clerk.requireAuth(), endpoint_youtubePlaylistImg);
 app.get('/api/youtubechannel/:playlistId',    clerk.requireAuth(), endpoint_getChannelInfo);
+
+// ── Government Schemes & Subsidies ───────────────────────────────────────────
+app.get('/api/schemes',                       clerk.requireAuth(), endpoint_getSchemes);
+app.post('/api/schemes/eligibility',          clerk.requireAuth(), express.json(), endpoint_checkSchemeEligibility);
 
 // ── Global Error Handler (Express 5 fallback) ────────────────────────────────
 // If any async route throws an unhandled error, Express 5 catches it here.

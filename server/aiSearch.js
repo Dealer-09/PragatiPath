@@ -29,8 +29,9 @@ async function endpoint_geminiYoutubeSearch(req, res) {
             `Respond ONLY as a JSON array. Each item must have: title (string), url (full YouTube search URL), channel (string). ` +
             `No markdown, no extra text. Example: [{"title":"...","url":"https://www.youtube.com/results?search_query=...","channel":"..."}]`
         );
-        let text = result.response.text().trim()
-            .replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```$/i, '');
+        let text = result.response.text().trim();
+        const match = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+        if (match) text = match[1].trim();
         const videos = JSON.parse(text);
         res.json({ videos });
     } catch (err) {
@@ -97,20 +98,27 @@ async function endpoint_getChannelInfo(req, res) {
 async function endpoint_openWeatherAPI(req, res) {
     const { lat, lon } = req.params;
     try {
-        const wres = await fetch(
-            `https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&appid=${process.env.OPENWEATHER_API_KEY}&units=metric`
-        );
-        const data = await wres.json();
+        // Run weather + reverse geocode in parallel — same API key, one extra call bundled here
+        // so the client never needs to call geocode separately (mandi reuses state/district)
+        const [wres, gres] = await Promise.all([
+            fetch(`https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&appid=${process.env.OPENWEATHER_API_KEY}&units=metric`),
+            fetch(`http://api.openweathermap.org/geo/1.0/reverse?lat=${lat}&lon=${lon}&limit=1&appid=${process.env.OPENWEATHER_API_KEY}`)
+        ]);
+        const data    = await wres.json();
+        const geoData = await gres.json().catch(() => []);
         // Guard against API error responses (bad key, invalid coords, quota exceeded)
         if (!data.weather || !data.main) {
             return res.status(502).json({ error: data.message || "Weather data unavailable." });
         }
+        const geo = Array.isArray(geoData) && geoData[0] ? geoData[0] : {};
         res.json({
-            name: data.name,
-            weather: data.weather[0].description,
-            temp: data.main.temp,
+            name:     data.name,
+            weather:  data.weather[0].description,
+            temp:     data.main.temp,
             humidity: data.main.humidity,
-            wind: data.wind.speed
+            wind:     data.wind.speed,
+            state:    geo.state    || null,   // e.g. "West Bengal" — reused by mandi
+            district: geo.name     || null    // e.g. "Bally"
         });
     } catch (err) {
         console.error("[aiSearch] endpoint_openWeatherAPI failed", err);
@@ -205,21 +213,21 @@ async function endpoint_getAgronomyData(req, res) {
         const startYear = endYear - 5;
         const meteoUrl = `https://archive-api.open-meteo.com/v1/archive?latitude=${lat}&longitude=${lon}&start_date=${startYear}-01-01&end_date=${endYear}-12-31&daily=temperature_2m_mean,precipitation_sum&timezone=auto`;
 
-        // Fetch concurrently
+        // Fetch concurrently, with a strict 15-second timeout so a dead API doesn't freeze the dashboard forever
         const [soilRes, meteoRes] = await Promise.all([
-            fetch(soilUrl),
-            fetch(meteoUrl)
+            fetch(soilUrl, { signal: AbortSignal.timeout(15000) }).catch(e => { console.warn("SoilGrids fetch failed:", e.message); return null; }),
+            fetch(meteoUrl, { signal: AbortSignal.timeout(15000) }).catch(e => { console.warn("Open-Meteo fetch failed:", e.message); return null; })
         ]);
 
         // Safely parse JSON, handling potential API failures or empty responses
         let soilData = {};
-        if (soilRes.ok && soilRes.status !== 204) {
+        if (soilRes && soilRes.ok && soilRes.status !== 204) {
             const text = await soilRes.text();
             try { soilData = JSON.parse(text); } catch (e) {}
         }
         
         let meteoData = {};
-        if (meteoRes.ok && meteoRes.status !== 204) {
+        if (meteoRes && meteoRes.ok && meteoRes.status !== 204) {
             const text = await meteoRes.text();
             try { meteoData = JSON.parse(text); } catch (e) {}
         }
@@ -314,34 +322,38 @@ Respond ONLY with a valid JSON object matching this exact schema, no markdown fo
 `;
 
         const result = await model.generateContent(prompt);
-        let text = result.response.text().trim()
-            .replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```$/i, '');
+        let text = result.response.text().trim();
+        const match = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+        if (match) text = match[1].trim();
         
         const parsed = JSON.parse(text);
         res.json(parsed);
     } catch (err) {
         console.error("[Gemini Agronomy] Error:", err.message);
-        res.status(500).json({ error: err.message });
+        res.status(500).json({ error: friendlyGeminiError(err) });
     }
 }
 
-// ── Phase 4: Live Mandi Prices (data.gov.in) ──────────────────────────────────
+// ── Phase 4: Live Mandi Prices (data.gov.in) ────────────────────────────────────
 async function endpoint_getMandiPrices(req, res) {
     const { lat, lon } = req.params;
     if (!lat || !lon) return res.status(400).json({ error: "Missing lat/lon parameters" });
 
     try {
-        // 1. Reverse Geocode using OpenWeather
-        const geoUrl = `http://api.openweathermap.org/geo/1.0/reverse?lat=${lat}&lon=${lon}&limit=1&appid=${process.env.OPENWEATHER_API_KEY}`;
-        const geoRes = await fetch(geoUrl);
-        const geoData = await geoRes.json();
+        let state    = req.query.state    || null;
+        let district = req.query.district || null;
 
-        if (!geoData || geoData.length === 0) {
-            return res.status(404).json({ error: "Could not determine state from coordinates." });
+        // Only call OpenWeather geocode if the client didn't pass state (avoids duplicate call)
+        if (!state) {
+            const geoUrl = `http://api.openweathermap.org/geo/1.0/reverse?lat=${lat}&lon=${lon}&limit=1&appid=${process.env.OPENWEATHER_API_KEY}`;
+            const geoRes = await fetch(geoUrl);
+            const geoData = await geoRes.json();
+            if (!Array.isArray(geoData) || geoData.length === 0) {
+                return res.status(404).json({ error: "Could not determine state from coordinates." });
+            }
+            state    = geoData[0].state;
+            district = geoData[0].name;
         }
-
-        const state = geoData[0].state; // e.g. "West Bengal"
-        const district = geoData[0].name; // e.g. "Bally"
 
         // 2. Fetch Mandi Prices from data.gov.in
         const govKey = process.env.GOV_DATA_API_KEY;
@@ -353,22 +365,173 @@ async function endpoint_getMandiPrices(req, res) {
         // Dataset ID: 9ef84268-d588-465a-a308-a864a43d0070
         const mandiUrl = `https://api.data.gov.in/resource/9ef84268-d588-465a-a308-a864a43d0070?api-key=${govKey}&format=json&filters[state]=${encodeURIComponent(state)}&limit=15`;
         
-        const mandiRes = await fetch(mandiUrl);
+        const mandiRes  = await fetch(mandiUrl);
         const mandiData = await mandiRes.json();
 
         if (!mandiData || !mandiData.records) {
             return res.json({ state, district, records: [] });
         }
 
-        res.json({
-            state,
-            district,
-            records: mandiData.records
-        });
+        res.json({ state, district, records: mandiData.records });
 
     } catch (err) {
         console.error("[Mandi API] Error:", err);
         res.status(500).json({ error: "Failed to fetch Mandi prices." });
+    }
+}
+
+// ── Phase 5: Government Schemes & Subsidies Tracker ──────────────────────────
+const GOVT_SCHEMES = [
+    {
+        id: 'pm-kisan',
+        name: 'PM-KISAN',
+        fullName: 'Pradhan Mantri Kisan Samman Nidhi',
+        emoji: '💰',
+        category: 'Income Support',
+        benefit: '₹6,000/year (3 installments of ₹2,000)',
+        cycle: 'April–July · August–November · December–March',
+        eligibility: 'All landholding farmer families. Aadhaar + e-KYC mandatory.',
+        exclusions: 'Income tax payers, Govt employees (above Group D), pensioners >₹10k/month, MPs/MLAs.',
+        howToApply: 'Visit Farmers Corner on pmkisan.gov.in or nearest CSC. Registration is FREE.',
+        applyUrl: 'https://pmkisan.gov.in',
+        helpline: '155261',
+        tags: ['all', 'income', 'national']
+    },
+    {
+        id: 'pmfby',
+        name: 'PMFBY',
+        fullName: 'Pradhan Mantri Fasal Bima Yojana',
+        emoji: '🛡️',
+        category: 'Crop Insurance',
+        benefit: 'Full coverage for crop loss due to natural calamities, pests, or disease. Premium as low as 1.5–2% for Kharif and 2% for Rabi.',
+        cycle: 'Kharif (sow by July) · Rabi (sow by December) · Check state portal for exact deadlines.',
+        eligibility: 'All farmers including sharecroppers and tenant farmers growing notified crops. Voluntary since 2021.',
+        exclusions: 'Non-notified crops in your area. Check your district notification.',
+        howToApply: 'Enroll at pmfby.gov.in, nearest bank branch, CSC, or via Crop Insurance App. Report crop loss within 72 hrs via KrishiRakshak helpline.',
+        applyUrl: 'https://pmfby.gov.in',
+        helpline: '14447',
+        tags: ['all', 'insurance', 'kharif', 'rabi', 'national']
+    },
+    {
+        id: 'kcc',
+        name: 'Kisan Credit Card',
+        fullName: 'Kisan Credit Card (KCC) Scheme',
+        emoji: '💳',
+        category: 'Agricultural Credit',
+        benefit: 'Short-term crop loans up to ₹5 lakh at 7% p.a. Effective rate drops to 4% p.a. with prompt repayment. Collateral-free up to ₹2 lakh.',
+        cycle: 'Valid for 5 years with annual review. Apply anytime.',
+        eligibility: 'Owner-cultivators, tenant farmers, oral lessees, sharecroppers. SHGs/JLGs also eligible. Age 18–75 years.',
+        exclusions: 'No land records or Aadhaar make application difficult.',
+        howToApply: 'Apply at nearest bank branch (SBI, PNB, Cooperative Bank etc.), JanSamarth portal, or CSC. Digital KCC available via some bank apps.',
+        applyUrl: 'https://jansamarth.in',
+        helpline: '1800-180-1551',
+        tags: ['all', 'credit', 'loan', 'national']
+    },
+    {
+        id: 'pmksy',
+        name: 'PMKSY (PDMC)',
+        fullName: 'PM Krishi Sinchayee Yojana – Per Drop More Crop',
+        emoji: '💧',
+        category: 'Irrigation Subsidy',
+        benefit: '55% subsidy on drip/sprinkler systems for Small & Marginal Farmers. 45% for others. State top-ups additional.',
+        cycle: 'Rolling applications via state agriculture/horticulture department.',
+        eligibility: 'All farmers owning land who wish to install micro-irrigation. SHGs, cooperatives, Water User Associations (WUAs) also eligible.',
+        exclusions: 'Rented/leased land without ownership proof typically ineligible.',
+        howToApply: 'Visit nearest Krishi Vigyan Kendra (KVK) or Block/District Agriculture Office. Apply online via state agriculture portal.',
+        applyUrl: 'https://pmksy.gov.in',
+        helpline: '1800-180-1551',
+        tags: ['all', 'irrigation', 'subsidy', 'national']
+    },
+    {
+        id: 'enam',
+        name: 'eNAM',
+        fullName: 'National Agriculture Market (eNAM)',
+        emoji: '🏪',
+        category: 'Market Access',
+        benefit: 'Sell produce online to buyers across India via transparent bidding. Free quality assaying (testing) at mandis. Direct bank payment.',
+        cycle: 'Ongoing. Register once and sell anytime.',
+        eligibility: 'All farmers growing any agricultural commodity. Registration is completely FREE.',
+        exclusions: 'Available only in districts/states with eNAM-integrated mandis.',
+        howToApply: 'Register at enam.gov.in or via the eNAM mobile app. Choose your nearest mandi and complete KYC with Aadhaar and bank details.',
+        applyUrl: 'https://www.enam.gov.in',
+        helpline: '1800-270-0224',
+        tags: ['all', 'market', 'selling', 'national']
+    },
+    {
+        id: 'shc',
+        name: 'Soil Health Card',
+        fullName: 'Soil Health Card (SHC) Scheme',
+        emoji: '🌱',
+        category: 'Soil Testing',
+        benefit: 'Free soil testing for 12 parameters (pH, N, P, K, micronutrients). Crop-specific fertilizer recommendations. Reduces input costs.',
+        cycle: 'Soil samples collected every 3 years. Request anytime at local office.',
+        eligibility: 'All farmers across India. No restrictions.',
+        exclusions: 'None.',
+        howToApply: 'Visit soilhealth.dac.gov.in to find nearest soil testing lab. Request sample collection through local agriculture department.',
+        applyUrl: 'https://soilhealth.dac.gov.in',
+        helpline: '1800-180-1551',
+        tags: ['all', 'soil', 'free', 'national']
+    },
+    {
+        id: 'pm-kusum',
+        name: 'PM-KUSUM',
+        fullName: 'Pradhan Mantri Kisan Urja Suraksha evam Utthaan Mahabhiyan',
+        emoji: '☀️',
+        category: 'Solar Energy',
+        benefit: '60% subsidy (30% central + 30% state) on solar pumps for irrigation. Farmers can also sell surplus solar energy to DISCOM.',
+        cycle: 'Applications via state nodal agencies. Check your state energy department.',
+        eligibility: 'All farmers with agricultural land and a need for irrigation. Individual and SHG applications allowed.',
+        exclusions: 'Varies by state. Some states have waiting lists due to high demand.',
+        howToApply: 'Apply via your State Nodal Agency (e.g., MNRE-designated body). Visit mnre.gov.in for state-wise contacts.',
+        applyUrl: 'https://mnre.gov.in/pm-kusum',
+        helpline: '1800-180-3333',
+        tags: ['all', 'solar', 'irrigation', 'subsidy', 'national']
+    }
+];
+
+async function endpoint_getSchemes(req, res) {
+    // Returns the full static scheme list. No external API needed.
+    res.json({ schemes: GOVT_SCHEMES });
+}
+
+async function endpoint_checkSchemeEligibility(req, res) {
+    const key = req.headers['x-gemini-key'];
+    if (!key) return res.status(400).json({ error: 'No Gemini API key provided. Set your key in the dashboard to use AI eligibility check.' });
+
+    const { state, crops, landOwnership, isLoanee } = req.body;
+    if (!state) return res.status(400).json({ error: 'State is required for eligibility check.' });
+
+    try {
+        const ai = new GoogleGenerativeAI(key);
+        const model = ai.getGenerativeModel({ model: 'gemini-2.5-flash' });
+
+        const prompt = `You are an expert on Indian government agricultural schemes. A farmer has the following profile:
+- State: ${state}
+- Crops grown: ${crops || 'Unknown'}
+- Land ownership: ${landOwnership || 'Owner'}
+- Has crop loan / KCC: ${isLoanee ? 'Yes' : 'No'}
+
+Available schemes: PM-KISAN (income support), PMFBY (crop insurance), Kisan Credit Card (credit), PMKSY-PDMC (irrigation subsidy), eNAM (market access), Soil Health Card (free soil test), PM-KUSUM (solar pump subsidy).
+
+For each scheme, give a SHORT, practical recommendation. Be specific to their state and crop situation.
+Respond ONLY as a valid JSON array (no markdown). Each item must match this schema exactly:
+{
+  "schemeId": "pm-kisan",
+  "priority": "High" | "Medium" | "Low",
+  "verdict": "one sentence on if they should apply",
+  "tip": "one actionable state-specific tip"
+}
+Return all 7 schemes in the array.`;
+
+        const result = await model.generateContent(prompt);
+        let text = result.response.text().trim();
+        const match = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+        if (match) text = match[1].trim();
+        const eligibility = JSON.parse(text);
+        res.json({ eligibility });
+    } catch (err) {
+        console.error('[Schemes] Eligibility check failed:', err.message);
+        res.status(500).json({ error: friendlyGeminiError(err) });
     }
 }
 
@@ -380,5 +543,7 @@ module.exports = {
     endpoint_chatbot,
     endpoint_getAgronomyData,
     endpoint_geminiAgronomyIntelligence,
-    endpoint_getMandiPrices
+    endpoint_getMandiPrices,
+    endpoint_getSchemes,
+    endpoint_checkSchemeEligibility
 };

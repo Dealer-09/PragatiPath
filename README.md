@@ -13,7 +13,14 @@ PRAGATI PATH is a full-stack web platform designed to assist Indian farmers by l
 - 📊 **Market Integration** — Real-time APMC Mandi commodity prices via `data.gov.in`.
   - **Zero-Cost Synergy:** Utilizes OpenWeather's Reverse Geocoding API to dynamically translate raw GPS coordinates into the strict text-based state/district format required by the Indian Government API, seamlessly bridging two incompatible systems.
 - 💬 **Krishi Charcha Forum** — A community discussion board for farmers to share tips, crop alerts, and ask questions.
-- 📺 **YouTube Learning Module** — fetches top relevant videos and allows tracking course progress
+- 🏛️ **Government Schemes Tracker** — Static database of 7 national schemes (PM-KISAN, PMFBY, KCC, PMKSY, eNAM, Soil Health Card, PM-KUSUM) with eligibility info, helplines, and direct apply links
+  - ⚠️ **Deadline Banners** — Auto-shows PMFBY Kharif/Rabi or PM-KISAN installment alerts based on current month (pure date math, zero API)
+  - 🤖 **AI Eligibility Check** — Gemini ranks all 7 schemes by priority for the farmer's state, crops, and land ownership
+- 🗓️ **Smart Farming Calendar** — Daily learning tracker with a **Crop Timeline Overlay**: pinned crops show their sowing/growing/harvest phase for each calendar month (zero API calls)
+- 🌡️ **Weather-Aware Greeting** — Contextual farming tip (e.g. "🌧️ Rain today — delay pesticides") shown after weather loads, using already-fetched data; **zero extra API requests**
+- 📤 **WhatsApp Share** — One-tap share of plant disease scan results (works on both Gemini and offline AI modes)
+- 🌐 **Language-Aware YouTube Search** — Reads the active Google Translate language and appends it to every YouTube query (supports 9 Indian languages: Hindi, Bengali, Tamil, Telugu, Marathi, Gujarati, Kannada, Malayalam, Punjabi)
+- 📺 **YouTube Learning Module** — Fetches top relevant videos and allows tracking course progress
 - 🔐 Secure login and protected routes using **Clerk** authentication
 - 🔑 **BYOK Architecture (Bring Your Own Key)** — Gemini API keys are securely provided by users and stored only in their local browser storage, ensuring free hosting and no central API cost.
 
@@ -78,9 +85,13 @@ flowchart TB
     API -->|"Fetch pH/Nitrogen"| SoilGrids
     API -->|"Fetch 10-yr Climate"| OpenMeteo
     API -->|"Bundled Soil+Weather JSON"| Gemini
-    
-    %% Video
-    API -->|"Search Queries"| YouTubeAPI
+
+    %% Schemes (static, no external API)
+    UI -->|"GET /api/schemes"| API
+    UI -->|"POST /api/schemes/eligibility"| Gemini
+
+    %% Video (language-aware)
+    API -->|"Localised Search Queries"| YouTubeAPI
 ```
 
 ## 📦 Getting Started
@@ -139,4 +150,4 @@ The app will be running at `http://localhost:8080`.
 
 ## 📄 License
 
-MIT © 2025 Archisman Pal
+GPL-3.0 © 2025 Archisman Pal

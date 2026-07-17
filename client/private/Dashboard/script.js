@@ -1,3 +1,11 @@
+window.addEventListener('error', (e) => {
+    console.error('[PragatiPath UI Error]:', e.error || e.message);
+});
+
+window.addEventListener('unhandledrejection', (e) => {
+    console.warn('[PragatiPath Async Error]:', e.reason);
+});
+
 const logoutBtn = document.querySelector(".logout-btn");
 const logoutIcon = document.querySelector("#logout-icon");
 const logoutIconDock = document.querySelector("#logout-icon-dock");
@@ -16,6 +24,8 @@ window.fetch = function(url, opts = {}) {
 let userData = null;
 let _lastScannedCrop = null;
 let _lastWeatherData = null; // populated after each weather fetch, used by getWeather() button
+let _lastScanResult = null;  // last plant scan result object (Gemini or offline)
+let _lastScanFile   = null;  // last image File object used for scan (for Web Share API)
 
 // ── Pinned Crops Logic (multi-pin) ──────────────────────────────────────────────
 const PINNED_KEY = 'pragati_pinned_crops_v2';
@@ -171,6 +181,39 @@ let currentDate = new Date();
 let currentMonth = currentDate.getMonth();
 let currentYear = currentDate.getFullYear();
 
+// ── Crop Seasonal Calendar (month → crop sowing/harvest advice) ──────────────
+// Indexed by month (0=Jan ... 11=Dec). Shows sowing/harvest advice for common crops.
+const CROP_CALENDAR = {
+    'Rice':    ['🌱 Prepare nursery beds','🌱 Transplant seedlings','🌾 Growing season','🌾 Growing season','🌾 Growing season','🌾 Growing season','🌱 Kharif sowing','🌿 Transplant seedlings','🌿 Growing season','🌿 Growing season','🌾 Kharif harvest','🌱 Rabi sowing'],
+    'Wheat':   ['🌱 Rabi growing','🌱 Growing season','🌾 Harvesting time','🌾 Threshing','⏸ Land prep','⏸ Land prep','⏸ Land prep','⏸ Land prep','⏸ Land prep','🌱 Sowing begins','🌱 Sowing continues','🌿 Growing season'],
+    'Cotton':  ['⏸ Off season','⏸ Land prep','⏸ Irrigation','🌱 Sowing month','🌱 Germination','🌿 Growing season','🌿 Growing season','🌿 Boll formation','🌿 Boll formation','🌾 Harvest begins','🌾 Peak harvest','🌾 Final picking'],
+    'Maize':   ['⏸ Land prep','⏸ Land prep','🌱 Rabi harvest','🌾 Rabi harvest','⏸ Land prep','🌱 Kharif sowing','🌿 Growing season','🌿 Tasseling','🌾 Kharif harvest','⏸ Land prep','🌱 Rabi sowing','🌿 Rabi growing'],
+    'Potato':  ['🌾 Harvesting','🌾 Post-harvest','⏸ Storage','⏸ Off season','⏸ Off season','⏸ Land prep','⏸ Land prep','⏸ Land prep','⏸ Land prep','🌱 Sowing begins','🌱 Growing season','🌿 Growing season'],
+    'Onion':   ['🌾 Harvest Kharif','🌱 Rabi transplant','🌿 Rabi growing','🌿 Rabi growing','🌾 Rabi harvest','⏸ Curing','🌱 Kharif nursery','🌱 Kharif transplant','🌿 Kharif growing','🌿 Kharif growing','🌾 Late Kharif harvest','⏸ Storage'],
+    'Tomato':  ['🌱 Winter sowing','🌿 Growing','🌾 Harvest','🌾 Harvest','🌱 Summer sowing','🌿 Growing','🌿 Growing','🌱 Kharif sowing','🌿 Growing','🌾 Harvest','🌾 Harvest','🌱 Winter sowing'],
+    'Sugarcane':['🌿 Growing','🌿 Growing','🌿 Growing','🌾 Harvest peak','🌾 Harvest','🌱 Sowing','🌱 Sowing','🌿 Early growth','🌿 Growing','🌿 Growing','🌿 Grand growth','🌾 Pre-harvest'],
+    'Soybean': ['⏸ Off season','⏸ Land prep','⏸ Land prep','⏸ Land prep','⏸ Land prep','🌱 Kharif sowing','🌿 Growing','🌿 Pod filling','🌿 Maturation','🌾 Harvest','⏸ Off season','⏸ Off season'],
+    'Mustard': ['🌿 Growing','🌾 Harvest','🌾 Threshing','⏸ Land prep','⏸ Off season','⏸ Off season','⏸ Off season','⏸ Off season','⏸ Off season','🌱 Sowing','🌿 Growing','🌿 Flowering'],
+};
+
+function getCropCalendarHint(month) {
+    const pins = getPinnedCrops();
+    if (!pins.length) return '';
+    const lines = pins.map(p => {
+        const crop = p.commodity;
+        // Try exact match, then case-insensitive partial match
+        const key = Object.keys(CROP_CALENDAR).find(k => k.toLowerCase() === crop.toLowerCase())
+                 || Object.keys(CROP_CALENDAR).find(k => crop.toLowerCase().includes(k.toLowerCase()));
+        if (!key) return null;
+        return `<span style="display:block; font-size:0.8rem; color:#2e7d32;">🌾 <strong>${escapeHtml(crop)}:</strong> ${CROP_CALENDAR[key][month]}</span>`;
+    }).filter(Boolean);
+    if (!lines.length) return '';
+    return `<div style="margin-top:10px; padding:8px 10px; background:#f0fdf4; border-radius:8px; border:1px solid #c8e6c9;">
+        <div style="font-size:0.75rem; color:#555; font-weight:600; margin-bottom:4px;">📅 Your Pinned Crops This Month:</div>
+        ${lines.join('')}
+    </div>`;
+}
+
 const learningSchedule = {
     1: "📘 Organic Farming Basics",
     2: "💻 Using Smartphones for Agriculture",
@@ -239,8 +282,10 @@ function generateCalendar() {
             const task = learningSchedule[day] || "📝 No specific task. Use this day to review!";
             const isCompleted = completedDays.includes(day);
 
+            const cropHint = getCropCalendarHint(currentMonth);
             taskBox.innerHTML = `
                 🎓 <strong>Learning for ${day} ${months[currentMonth]}:</strong><br>${task}
+                ${cropHint}
                 <br><br>
                 <button id="done-btn">${isCompleted ? "✅ Completed" : "✅ Mark as Done"}</button>
             `;
@@ -259,14 +304,12 @@ function generateCalendar() {
 
 function detectLanguage() {
     const lang = navigator.language || navigator.userLanguage;
-    let message = "";
-
-    if (lang.startsWith("hi")) message = "🌍 आपकी भाषा पहचानी गई: हिंदी";
-    else if (lang.startsWith("bn")) message = "🌍 আপনার ভাষা: বাংলা";
-    else if (lang.startsWith("ta")) message = "🌍 உங்கள் மொழி: தமிழ்";
-    else message = `🌍 Detected Language: ${lang}`;
-
-    languageInfo.textContent = message;
+    const map = {
+        'hi': '🌍 आपकी भाषा पहचानी गई: हिंदी',
+        'bn': '🌍 আপনার ভাষা: বাংলা',
+        'ta': '🌍 உங்கள் மொழி: தமிழ்'
+    };
+    languageInfo.textContent = map[lang.slice(0, 2)] || `🌍 Detected Language: ${lang}`;
 }
 
 function loadNotes() {
@@ -428,7 +471,12 @@ window.addEventListener('load', async () => {
         // fullName may be empty for older accounts, fall back to name
         document.getElementById("username").innerText = userData.fullName || userData.name || "Farmer";
         if (userData.imgUrl) {
-            document.getElementById("profilePic").innerHTML = `<img src="${userData.imgUrl}" alt="Profile Picture" />`;
+            // Use createElement to avoid XSS risk from raw innerHTML injection
+            const img = document.createElement('img');
+            img.src = userData.imgUrl;
+            img.alt = 'Profile Picture';
+            document.getElementById("profilePic").innerHTML = '';
+            document.getElementById("profilePic").appendChild(img);
         }
 
         const mycoursesContainer = document.querySelector('.course-cards-container');
@@ -556,11 +604,13 @@ function showSection(targetId) {
 
 // ── Community: Tab switcher ───────────────────────────────────────────────────
 window.showCommTab = function(tab) {
-    document.getElementById('comm-mandi').style.display  = tab === 'mandi' ? 'block' : 'none';
-    document.getElementById('comm-forum').style.display  = tab === 'forum' ? 'block' : 'none';
+    document.getElementById('comm-mandi').style.display   = tab === 'mandi'   ? 'block' : 'none';
+    document.getElementById('comm-forum').style.display   = tab === 'forum'   ? 'block' : 'none';
+    document.getElementById('comm-schemes').style.display = tab === 'schemes' ? 'block' : 'none';
     document.querySelectorAll('.comm-tab').forEach(btn => btn.classList.remove('active'));
     document.getElementById(`tab-${tab}`).classList.add('active');
-    if (tab === 'forum') loadForumPosts();
+    if (tab === 'forum')   loadForumPosts();
+    if (tab === 'schemes') loadSchemes();
 };
 
 // ── Krishi Charcha Forum ──────────────────────────────────────────────────────
@@ -577,7 +627,7 @@ async function loadForumPosts(force = false) {
         // Prevent JSON parse crash if Clerk redirects to the HTML login page
         const contentType = res.headers.get('content-type');
         if (!contentType || !contentType.includes('application/json')) {
-            window.location.href = '../Accounts/signin.html';
+            window.location.href = window.location.origin + '/public/Accounts/signin.html';
             return;
         }
 
@@ -605,13 +655,13 @@ function renderForumPost(p) {
         <div class="forum-post-header">
             ${avatar}
             <div>
-                <strong style="font-size:0.9rem; color:#2e7d32;">${escapeHtml(p.authorName)}</strong>
+                <strong style="font-size:0.9rem; color:#2e7d32;">${escapeHtml(p.authorName || '')}</strong>
                 <span style="color:#aaa; font-size:0.78rem; margin-left:8px;">${timeAgo}</span>
             </div>
-            <span class="forum-tag ${p.tag}">${p.tag}</span>
+            <span class="forum-tag ${p.tag}">${p.tag || ''}</span>
         </div>
-        <p class="forum-post-title">${escapeHtml(p.title)}</p>
-        <p class="forum-post-body">${escapeHtml(p.body)}</p>
+        <p class="forum-post-title">${escapeHtml(p.title || '')}</p>
+        <p class="forum-post-body">${escapeHtml(p.body || '')}</p>
         <div class="forum-post-meta">
             <button class="forum-like-btn" onclick="likePost('${p._id}', this)">❤️ ${likeCount}</button>
         </div>
@@ -622,12 +672,13 @@ function escapeHtml(text) {
     return String(text).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
+const rtf = new Intl.RelativeTimeFormat('en', { numeric: 'auto', style: 'short' });
 function formatTimeAgo(date) {
     const diff = (Date.now() - date) / 1000;
-    if (diff < 60)    return 'just now';
-    if (diff < 3600)  return `${Math.floor(diff/60)}m ago`;
-    if (diff < 86400) return `${Math.floor(diff/3600)}h ago`;
-    return `${Math.floor(diff/86400)}d ago`;
+    if (diff < 60) return 'just now';
+    if (diff < 3600) return rtf.format(-Math.floor(diff/60), 'minute');
+    if (diff < 86400) return rtf.format(-Math.floor(diff/3600), 'hour');
+    return rtf.format(-Math.floor(diff/86400), 'day');
 }
 
 window.submitForumPost = async function() {
@@ -755,6 +806,7 @@ function renderGeminiResult(data) {
                 <p style="color:#4CAF50">Your plant looks healthy! ${data.prevention}</p>
             </div>`}
             <p class="plant-result-source">Powered by Gemini Vision</p>
+            <button onclick="shareResultToWhatsApp()" style="margin-top:10px; padding:7px 16px; background:#25D366; color:#fff; border:none; border-radius:8px; font-size:0.82rem; font-weight:600; cursor:pointer;">📤 Share on WhatsApp</button>
         </div>`;
 }
 
@@ -826,6 +878,7 @@ function renderOfflineResult(top5, backend, inferMs) {
             </div>
             ${altRows ? `<div class="plant-result-section"><strong>Other possibilities</strong><p>${altRows}</p></div>` : ''}
             <p class="plant-result-source">${{'litert-webgpu':'⚡ LiteRT WebGPU','litert-wasm':'🔵 LiteRT WASM'}[backend] || backend} · ${inferMs}ms · Set a Gemini key for detailed treatments</p>
+            <button onclick="shareResultToWhatsApp()" style="margin-top:10px; padding:7px 16px; background:#25D366; color:#fff; border:none; border-radius:8px; font-size:0.82rem; font-weight:600; cursor:pointer;">📤 Share on WhatsApp</button>
         </div>`;
 }
 
@@ -867,6 +920,8 @@ async function analyzeImage(file) {
             if (data.error) throw new Error(data.error);
 
             _lastScannedCrop = data.crop;
+            _lastScanResult  = data;   // store for WhatsApp share
+            _lastScanFile    = file;   // store image for Web Share API
 
             // Use the proper structured renderer (not inline HTML)
             renderGeminiResult(data);
@@ -880,12 +935,7 @@ async function analyzeImage(file) {
                 searchYouTube();
             }
             
-            // Re-fetch agronomy intelligence now that we know their active crop
-            if (selectedLat && selectedLng) {
-                getWeatherByCoords(selectedLat, selectedLng);
-            } else if (userData && userData.location && userData.location.lat) {
-                getWeatherByCoords(userData.location.lat, userData.location.lng);
-            }
+            // Automatically removed unnecessary background weather re-trigger here
             
         } catch (err) {
             predictionText.innerHTML = `<p style="color:#c00">❌ Gemini error: ${err.message}</p>`;
@@ -893,10 +943,18 @@ async function analyzeImage(file) {
     } else {
         // ── Offline ViT path ──
         try {
+            // Clear any previous Gemini scan state so share produces correct output
+            _lastScanFile    = file;
+            _lastScanResult  = null;
+            _lastScannedCrop = null;
+
             // Wait for image to fully render so canvas can draw it
-            await new Promise(resolve => {
+            await new Promise((resolve, reject) => {
                 if (plantImg.complete) resolve();
-                else plantImg.onload = resolve;
+                else {
+                    plantImg.onload = resolve;
+                    plantImg.onerror = () => reject(new Error("Failed to load image for scanning."));
+                }
             });
 
             const { top5, backend, inferMs } = await PlantAI.predict(plantImg, (msg) => {
@@ -943,7 +1001,9 @@ async function getWeatherByCoords(lat, lon) {
             temp: currentData.temp,
             humidity: currentData.humidity,
             condition: currentData.weather,
-            location: currentData.name
+            location: currentData.name,
+            state: currentData.state,
+            district: currentData.district
         };
 
         // Render Weather
@@ -955,16 +1015,13 @@ async function getWeatherByCoords(lat, lon) {
 
         // Store for getWeather() button
         _lastWeatherData = { temp: currentWeather.temp, humidity: currentWeather.humidity, weather: currentWeather.condition, name: currentWeather.location };
+        // Expose the location name for the Schemes eligibility checker (state-level approximation)
+        window._userState = currentWeather.location;
+        // Zero-request weather-aware greeting tip (uses already-fetched data, no extra API call)
+        updateWeatherGreeting();
         fetchFarmingTips(_lastWeatherData);
 
-        // 2. Fetch raw agronomy data (SoilGrids + OpenMeteo)
-        const aRes = await fetch(`/api/agronomy/${lat}/${lon}`, { credentials: 'same-origin' });
-        const agronomyData = await aRes.json();
-        if (agronomyData.error) throw new Error(agronomyData.error);
-
-        if (soilDiv) soilDiv.innerHTML = '<p style="color:#888;font-size:0.9rem">⏳ Asking Gemini to analyze soil and weather...</p>';
-
-        // 3. Check Cache or Send to Gemini
+        // 2. Check Cache or Send to Gemini
         const cacheKey = 'pragati_agronomy_cache';
         const roundedLat = Number(lat).toFixed(2);
         const roundedLon = Number(lon).toFixed(2);
@@ -977,12 +1034,19 @@ async function getWeatherByCoords(lat, lon) {
                 // Valid if same location (within ~1.1km), < 24 hours old, and same scanned crop
                 if (cache.lat === roundedLat && cache.lon === roundedLon && (Date.now() - cache.timestamp < 24 * 60 * 60 * 1000) && cache.scannedCrop === _lastScannedCrop) {
                     gData = cache.gData;
-                    console.log("Using cached Gemini Agronomy data");
+                    console.log("Using cached Gemini Agronomy data, bypassing SoilGrids fetch");
                 }
             } catch(e) {}
         }
 
         if (!gData) {
+            if (soilDiv) soilDiv.innerHTML = '<p style="color:#888;font-size:0.9rem">⏳ Fetching Soil & Climate data...</p>';
+            const aRes = await fetch(`/api/agronomy/${lat}/${lon}`, { credentials: 'same-origin' });
+            const agronomyData = await aRes.json();
+            if (agronomyData.error) throw new Error(agronomyData.error);
+
+            if (soilDiv) soilDiv.innerHTML = '<p style="color:#888;font-size:0.9rem">⏳ Asking Gemini to analyze soil and weather...</p>';
+
             const geminiRes = await fetch('/api/gemini/agronomy', {
                 method: 'POST',
                 credentials: 'same-origin',
@@ -1052,7 +1116,11 @@ async function getWeatherByCoords(lat, lon) {
         // 4. Fetch Mandi Prices concurrently (independent of Gemini)
         if (mandiDiv) {
             try {
-                const mRes = await fetch(`/api/mandi/${lat}/${lon}`, { credentials: 'same-origin' });
+                const qParams = new URLSearchParams();
+                if (currentWeather.state) qParams.append('state', currentWeather.state);
+                if (currentWeather.district) qParams.append('district', currentWeather.district);
+                
+                const mRes = await fetch(`/api/mandi/${lat}/${lon}?${qParams.toString()}`, { credentials: 'same-origin' });
                 const mandiData = await mRes.json();
                 
                 if (mandiData.error) throw new Error(mandiData.error);
@@ -1099,6 +1167,19 @@ async function getWeatherByCoords(lat, lon) {
     } catch (err) {
         const weatherDivErr = document.getElementById('weatherResult');
         if (weatherDivErr) weatherDivErr.innerHTML = `<p style="color:#c00">Failed to load agronomy data: ${err.message}</p>`;
+        
+        // Ensure other loading states are cleared if a fatal error occurs
+        const errHtml = `<p style="color:#c00">Error: ${err.message}</p>`;
+        const soilDiv = document.getElementById('soilResult');
+        const cropsDiv = document.getElementById('cropsResult');
+        const fertDiv = document.getElementById('fertilizerResult');
+        const trendsDiv = document.getElementById('trendsResult');
+        if (soilDiv) soilDiv.innerHTML = errHtml;
+        if (cropsDiv) cropsDiv.innerHTML = errHtml;
+        if (fertDiv) fertDiv.innerHTML = errHtml;
+        if (trendsDiv) trendsDiv.innerHTML = errHtml;
+        const mandiErrDiv = document.getElementById('mandiResult');
+        if (mandiErrDiv && mandiErrDiv.innerHTML.includes('⏳')) mandiErrDiv.innerHTML = errHtml;
     }
 }
 
@@ -1207,7 +1288,7 @@ document.getElementById('save-location-btn').addEventListener('click', async () 
             document.getElementById('map-status').textContent = '✅ Location saved to your profile.';
             // Also update weather for new location immediately
             getWeatherByCoords(selectedLat, selectedLng);
-            userData.location = { lat: selectedLat, lng: selectedLng };
+            if (userData) userData.location = { lat: selectedLat, lng: selectedLng };
         } else {
             document.getElementById('map-status').textContent = '❌ Failed to save location.';
         }
@@ -1277,7 +1358,13 @@ async function searchYouTube() {
     results.innerHTML = '<p style="color:#888;text-align:center">⏳ Searching...</p>';
 
     try {
-        const res  = await fetch(`/api/gemini/youtube?q=${encodeURIComponent(query)}`, {
+        // Append language suffix from the Google Translate widget selection (zero extra requests)
+        const { suffix } = getYouTubeSearchLang();
+        // Only append if not already present and if a language other than English is active
+        const langQuery = (suffix && suffix !== 'in English')
+            ? `${query} ${suffix}`
+            : query;
+        const res  = await fetch(`/api/gemini/youtube?q=${encodeURIComponent(langQuery)}`, {
             credentials: 'same-origin',
             headers: geminiHeaders()
         });
@@ -1400,7 +1487,7 @@ async function listCourses() {
     }
 }
 
-listCourses();
+listCourses().catch(e => console.warn('[listCourses] Failed to fetch:', e.message));
 
 async function courseHandler(button) {
     localStorage.setItem('courseName', button.dataset.coursename);
@@ -1427,4 +1514,285 @@ async function courseHandler(button) {
     }
 
     window.location.href = window.location.origin + '/private/Player/player.html';
+}
+
+// ── Phase 5: Government Schemes & Subsidies Tracker ──────────────────────────
+let _schemesLoaded = false;
+
+async function loadSchemes() {
+    if (_schemesLoaded) return;
+    const feed = document.getElementById('schemes-feed');
+    if (!feed) return;
+    feed.innerHTML = '<p style="color:#888; text-align:center; grid-column:1/-1;">⏳ Loading schemes...</p>';
+    try {
+        const res = await fetch('/api/schemes', { credentials: 'same-origin' });
+        const contentType = res.headers.get('content-type');
+        if (!contentType || !contentType.includes('application/json')) {
+            window.location.href = window.location.origin + '/public/Accounts/signin.html'; return;
+        }
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        feed.innerHTML = data.schemes.map(s => renderSchemeCard(s)).join('');
+        _schemesLoaded = true;
+
+        // Inject PMFBY deadline banner above the cards
+        injectSchemesDeadlineBanner();
+    } catch (err) {
+        if (feed) feed.innerHTML = `<p style="color:#c00; grid-column:1/-1;">Failed to load schemes: ${err.message}</p>`;
+    }
+}
+
+function injectSchemesDeadlineBanner() {
+    const feed = document.getElementById('schemes-feed');
+    if (!feed) return;
+    const month = new Date().getMonth(); // 0=Jan
+    let deadline = null, urgency = 'info';
+
+    // Kharif enrollment: roughly June-July. Rabi: Oct-Nov.
+    if (month >= 5 && month <= 6) {
+        deadline = { label: '🛡️ PMFBY Kharif Enrollment', date: 'Deadline: ~31 July', msg: 'Enroll now to insure your Kharif crops. Deadline is typically end of July.', color: '#e65100' };
+        urgency = 'urgent';
+    } else if (month >= 9 && month <= 10) {
+        deadline = { label: '🛡️ PMFBY Rabi Enrollment', date: 'Deadline: ~31 December', msg: 'Rabi crop insurance enrollment is open. Apply before year-end.', color: '#1565c0' };
+    } else if (month === 3 || month === 4) {
+        // April–May: PM-KISAN installment (April-July cycle)
+        deadline = { label: '💰 PM-KISAN Installment', date: 'Current cycle: April–July', msg: 'Check your PM-KISAN payment status. If not received, verify e-KYC at pmkisan.gov.in.', color: '#2e7d32' };
+    }
+
+    if (!deadline) return;
+    const banner = document.createElement('div');
+    banner.style.cssText = `grid-column:1/-1; padding:12px 18px; background:#fff8e1; border:2px solid ${deadline.color}; border-radius:12px; display:flex; align-items:center; gap:14px;`;
+    banner.innerHTML = `
+        <div style="font-size:1.8rem;">⚠️</div>
+        <div>
+            <div style="font-weight:700; font-size:0.95rem; color:${deadline.color};">${escapeHtml(deadline.label)} — ${escapeHtml(deadline.date)}</div>
+            <div style="font-size:0.82rem; color:#555; margin-top:2px;">${escapeHtml(deadline.msg)}</div>
+        </div>`;
+    feed.insertBefore(banner, feed.firstChild);
+}
+
+function renderSchemeCard(s) {
+    const categoryColors = {
+        'Income Support':   { bg: '#e8f5e9', border: '#4caf50', badge: '#2e7d32' },
+        'Crop Insurance':   { bg: '#e3f2fd', border: '#1976d2', badge: '#0d47a1' },
+        'Agricultural Credit': { bg: '#fff8e1', border: '#f9a825', badge: '#e65100' },
+        'Irrigation Subsidy': { bg: '#e0f7fa', border: '#00838f', badge: '#006064' },
+        'Market Access':    { bg: '#f3e5f5', border: '#7b1fa2', badge: '#4a148c' },
+        'Soil Testing':     { bg: '#f1f8e9', border: '#558b2f', badge: '#33691e' },
+        'Solar Energy':     { bg: '#fff3e0', border: '#ef6c00', badge: '#bf360c' }
+    };
+    const c = categoryColors[s.category] || { bg: '#fafafa', border: '#ccc', badge: '#555' };
+    return `
+    <div style="background:${c.bg}; border:1.5px solid ${c.border}; border-radius:14px; padding:20px; display:flex; flex-direction:column; gap:10px;">
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
+            <div style="display:flex; align-items:center; gap:10px;">
+                <span style="font-size:1.8rem;">${escapeHtml(s.emoji)}</span>
+                <div>
+                    <div style="font-weight:700; font-size:1rem; color:#1a1a1a;">${escapeHtml(s.name)}</div>
+                    <div style="font-size:0.75rem; color:#555;">${escapeHtml(s.fullName)}</div>
+                </div>
+            </div>
+            <span style="background:${c.badge}; color:#fff; border-radius:20px; padding:3px 10px; font-size:0.72rem; font-weight:600; white-space:nowrap;">${escapeHtml(s.category)}</span>
+        </div>
+        <div style="font-size:0.85rem; color:#333;">
+            <div style="margin-bottom:6px;"><strong>💰 Benefit:</strong> ${escapeHtml(s.benefit)}</div>
+            <div style="margin-bottom:6px;"><strong>📅 Cycle:</strong> ${escapeHtml(s.cycle)}</div>
+            <div style="margin-bottom:6px;"><strong>✅ Who qualifies:</strong> ${escapeHtml(s.eligibility)}</div>
+            ${s.exclusions !== 'None.' ? `<div style="margin-bottom:6px; color:#b71c1c;"><strong>⛔ Excludes:</strong> ${escapeHtml(s.exclusions)}</div>` : ''}
+            <div style="margin-bottom:6px;"><strong>📋 How to apply:</strong> ${escapeHtml(s.howToApply)}</div>
+            <div><strong>📞 Helpline:</strong> <a href="tel:${escapeHtml(s.helpline)}" style="color:#2e7d32; font-weight:600;">${escapeHtml(s.helpline)}</a></div>
+        </div>
+        <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:4px;">
+            <a href="${encodeURI(s.applyUrl)}" target="_blank" rel="noopener noreferrer"
+                style="flex:1; min-width:120px; text-align:center; padding:8px 16px; background:#2e7d32; color:white; border-radius:8px; font-size:0.85rem; font-weight:600; text-decoration:none;">
+                🌐 Apply Now
+            </a>
+            <span class="scheme-ai-badge" data-id="${escapeHtml(s.id)}" style="flex:1; min-width:120px; text-align:center; padding:8px 16px; background:#fff; border:1.5px solid ${c.border}; color:${c.badge}; border-radius:8px; font-size:0.8rem; font-weight:600; cursor:default;">
+                ⏳ Run AI Check
+            </span>
+        </div>
+    </div>`;
+}
+
+window.checkSchemeEligibility = async function() {
+    const btn = document.getElementById('scheme-check-btn');
+    const resultDiv = document.getElementById('scheme-eligibility-result');
+    if (!btn || !resultDiv) return;
+
+    if (!getGeminiKey()) {
+        resultDiv.innerHTML = '<p style="color:#c00; font-size:0.85rem;">⚠️ Please set your Gemini API Key first (click the dot at the top-right of the dashboard).</p>';
+        return;
+    }
+
+    // Get the state from saved user location via userData
+    const state = window._userState || 'India';
+    const crops = document.getElementById('scheme-crops').value.trim() || 'Unknown';
+    const landOwnership = document.getElementById('scheme-land').value;
+    const isLoanee = document.getElementById('scheme-loanee').value === 'yes';
+
+    btn.disabled = true;
+    btn.textContent = '⏳ Analyzing...';
+    resultDiv.innerHTML = '<p style="color:#888; font-size:0.85rem;">Gemini is analyzing your profile against all 7 schemes...</p>';
+
+    try {
+        const res = await fetch('/api/schemes/eligibility', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json', 'x-gemini-key': getGeminiKey() },
+            body: JSON.stringify({ state, crops, landOwnership, isLoanee })
+        });
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        renderEligibilityResult(data.eligibility);
+
+        // Also update the AI badges on the scheme cards
+        data.eligibility.forEach(e => {
+            const badge = document.querySelector(`.scheme-ai-badge[data-id="${e.schemeId}"]`);
+            if (badge) {
+                const colors = { High: '#2e7d32', Medium: '#e65100', Low: '#757575' };
+                const icons  = { High: '🟢', Medium: '🟡', Low: '⚪' };
+                badge.textContent = `${icons[e.priority] || '•'} ${e.priority} Priority`;
+                badge.style.background = '#fff';
+                badge.style.color = colors[e.priority] || '#555';
+                badge.title = e.verdict;
+            }
+        });
+    } catch (err) {
+        resultDiv.innerHTML = `<p style="color:#c00; font-size:0.85rem;">❌ ${err.message}</p>`;
+    } finally {
+        btn.disabled = false;
+        btn.textContent = '🤖 Check My Eligibility';
+    }
+};
+
+function renderEligibilityResult(eligibility) {
+    const resultDiv = document.getElementById('scheme-eligibility-result');
+    if (!resultDiv || !Array.isArray(eligibility)) return;
+
+    const priorityOrder = { High: 0, Medium: 1, Low: 2 };
+    const sorted = [...eligibility].sort((a, b) => (priorityOrder[a.priority] ?? 9) - (priorityOrder[b.priority] ?? 9));
+
+    const rows = sorted.map(e => {
+        const icons  = { High: '🟢', Medium: '🟡', Low: '⚪' };
+        const colors = { High: '#1b5e20', Medium: '#bf360c', Low: '#555' };
+        return `<div style="padding:10px 0; border-bottom:1px solid #e0e0e0; display:flex; gap:12px; align-items:flex-start;">
+            <span style="font-size:1.2rem; margin-top:2px;">${icons[e.priority] || '•'}</span>
+            <div>
+                <div style="font-weight:600; font-size:0.9rem; color:${colors[e.priority] || '#333'}; text-transform:uppercase; letter-spacing:0.5px;">${escapeHtml(e.schemeId)} — ${escapeHtml(e.priority)} Priority</div>
+                <div style="font-size:0.85rem; color:#333; margin-top:2px;">${escapeHtml(e.verdict)}</div>
+                <div style="font-size:0.8rem; color:#555; margin-top:4px;">💡 ${escapeHtml(e.tip)}</div>
+            </div>
+        </div>`;
+    }).join('');
+
+    resultDiv.innerHTML = `
+        <div style="background:#fff; border-radius:10px; padding:12px 16px; border:1px solid #e0e0e0; margin-top:8px;">
+            <div style="font-weight:700; color:#1b5e20; margin-bottom:10px; font-size:0.9rem;">📊 Your Personalized Scheme Priority List</div>
+            ${rows}
+            <p style="font-size:0.72rem; color:#aaa; margin:10px 0 0;">Powered by Gemini · Based on your stated profile. Always verify eligibility at official portals.</p>
+        </div>`;
+}
+
+// ── WhatsApp Share ────────────────────────────────────────────────────────────
+window.shareResultToWhatsApp = async function() {
+    const r = _lastScanResult;
+    // Build a clean, readable message from the result data (not raw DOM text)
+    let msg;
+    if (r) {
+        const status = r.isHealthy ? '✅ Healthy' : `🔴 ${r.disease || 'Disease detected'}`;
+        const lines = [
+            '🌾 *PragatiPath Plant Scan Result*',
+            '',
+            `🌱 *Crop:* ${r.crop || 'Unknown'}`,
+            `📋 *Condition:* ${status}`,
+            `⚡ *Severity:* ${r.severity || 'N/A'}`,
+            `🎯 *Confidence:* ${r.confidence || 'N/A'}`,
+        ];
+        if (!r.isHealthy && r.treatment) {
+            lines.push('', `💊 *Treatment:* ${r.treatment}`);
+        }
+        if (r.prevention) {
+            lines.push('', `🛡️ *Prevention:* ${r.prevention}`);
+        }
+        lines.push('', '_Scanned using PragatiPath · pragatipath.onrender.com_');
+        msg = lines.join('\n');
+    } else {
+        msg = '🌾 *PragatiPath Plant Scan*\n\nScan your crops at pragatipath.onrender.com';
+    }
+
+    // Try Web Share API first — supports image + text and opens WhatsApp on mobile
+    if (_lastScanFile && navigator.canShare && navigator.canShare({ files: [_lastScanFile] })) {
+        try {
+            await navigator.share({
+                title: 'PragatiPath Plant Scan',
+                text: msg,
+                files: [_lastScanFile]
+            });
+            return; // done — native share sheet opened
+        } catch (err) {
+            if (err.name === 'AbortError') return; // user cancelled — do nothing
+            // any other error → fall through to WhatsApp URL
+        }
+    }
+
+    // Fallback: open WhatsApp web with text-only (desktop / unsupported browsers)
+    window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, '_blank', 'noopener');
+};
+
+// ── Language-Aware YouTube Search ─────────────────────────────────────────────
+// Reads the Google Translate cookie to detect the selected language.
+// Returns a localised search query and lang code for YouTube.
+function getYouTubeSearchLang() {
+    // Google Translate sets a cookie: googtrans=/en/hi  (source/target)
+    const cookie = document.cookie.split(';').find(c => c.trim().startsWith('googtrans='));
+    if (!cookie) return { lang: 'en', suffix: 'in English' };
+
+    const parts = cookie.trim().replace('googtrans=', '').split('/').filter(Boolean);
+    const target = parts[1] || 'en'; // e.g. 'hi', 'bn', 'ta', 'te', 'mr'
+
+    const langMap = {
+        'hi': { suffix: 'in Hindi',   yt: 'hi' },
+        'bn': { suffix: 'in Bengali', yt: 'bn' },
+        'ta': { suffix: 'in Tamil',   yt: 'ta' },
+        'te': { suffix: 'in Telugu',  yt: 'te' },
+        'mr': { suffix: 'in Marathi', yt: 'mr' },
+        'gu': { suffix: 'in Gujarati',yt: 'gu' },
+        'kn': { suffix: 'in Kannada', yt: 'kn' },
+        'ml': { suffix: 'in Malayalam', yt: 'ml' },
+        'pa': { suffix: 'in Punjabi', yt: 'pa' },
+    };
+    return langMap[target] || { suffix: 'for Indian farmers', yt: 'en' };
+}
+
+
+// ── Weather-Aware Greeting (zero extra requests) ──────────────────────────────
+// Called after _lastWeatherData is populated by the weather fetch.
+// Replaces static "Welcome" with a contextual one-line tip.
+function updateWeatherGreeting() {
+    if (!_lastWeatherData) return;
+    const h1 = document.querySelector('#dashboard .dashboard-header h1');
+    if (!h1) return;
+
+    const { weather, temp } = _lastWeatherData;
+    const cond = (weather || '').toLowerCase();
+    let tip = null;
+
+    if (cond.includes('rain') || cond.includes('drizzle') || cond.includes('thunder')) {
+        tip = '🌧️ Rain today — delay pesticide/fertilizer application';
+    } else if (temp > 38) {
+        tip = '🌡️ Heat alert — water your crops early morning or evening';
+    } else if (temp < 12) {
+        tip = '🥶 Cold night ahead — protect tender seedlings from frost';
+    } else if (cond.includes('mist') || cond.includes('fog') || cond.includes('haze')) {
+        tip = '🌫️ Low visibility — check for fungal risk on stored produce';
+    }
+
+    if (!tip) return;
+    // Insert tip as a small subtitle below h1, only if not already added
+    if (document.getElementById('weather-greeting-tip')) return;
+    const tipEl = document.createElement('p');
+    tipEl.id = 'weather-greeting-tip';
+    tipEl.style.cssText = 'margin:4px 0 0; font-size:0.82rem; color:#e65100; font-weight:600;';
+    tipEl.textContent = tip;
+    h1.insertAdjacentElement('afterend', tipEl);
 }

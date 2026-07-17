@@ -36,7 +36,6 @@ const Users = mongoose.model('users', userSchema);
 
 async function middleware_userAuth(req, res, next) {
     if (!_accountedFor.has(req.auth.userId)) {
-        _accountedFor.add(req.auth.userId);
         try {
             const existing = await Users.findOne({ userId: req.auth.userId });
             if (existing === null) {
@@ -55,6 +54,8 @@ async function middleware_userAuth(req, res, next) {
                 });
                 await userStore.save();
             }
+            // Only mark accounted for AFTER successful DB interaction
+            _accountedFor.add(req.auth.userId);
         } catch (error) {
             console.error("[UserDB] middleware_userAuth failed:", error.message);
             // Still call next() — auth passed, DB error shouldn't block the page
@@ -215,7 +216,7 @@ async function endpoint_getCourseByName(req, res) {
         const { courseName } = req.params;
         if (!courseName) return res.status(400).json({ error: "Course name is required" });
 
-        const course = await Courses.findOne({ name: courseName }, { _id: 0, __v: 0 });
+        const course = await Courses.findOne({ name: courseName }, { __v: 0 });
         if (!course) return res.status(404).json({ error: "Course not found" });
         res.json(course);
     } catch (error) {
@@ -284,13 +285,15 @@ async function endpoint_likeForumPost(req, res) {
         if (!post) return res.status(404).json({ error: 'Post not found.' });
 
         const alreadyLiked = post.likes.includes(userId);
-        if (alreadyLiked) {
-            post.likes.pull(userId);
-        } else {
-            post.likes.push(userId);
-        }
-        await post.save();
-        res.json({ likes: post.likes.length, liked: !alreadyLiked });
+        
+        // Use atomic operations to prevent read-modify-write race conditions
+        const updateOp = alreadyLiked 
+            ? { $pull: { likes: userId } }
+            : { $addToSet: { likes: userId } };
+            
+        const updatedPost = await ForumPost.findByIdAndUpdate(postId, updateOp, { new: true });
+        
+        res.json({ likes: updatedPost.likes.length, liked: !alreadyLiked });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
