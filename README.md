@@ -9,6 +9,10 @@ PRAGATI PATH is a full-stack web platform designed to assist Indian farmers by l
 - 🦠 **Plant Disease Detection** (Dual Mode)
   - **Primary:** Gemini Vision (Analyzes any crop, provides treatment/prevention)
   - **Fallback:** Offline MobileNetV3-Large (128 unified classes) running natively in-browser via **LiteRT WebGPU** (Fast, private, works offline)
+- 🌍 **Deep Agronomy Engine** — Integrates SoilGrids (soil chemistry) and Open-Meteo (historical climate) for hyper-local precision agriculture.
+- 📊 **Market Integration** — Real-time APMC Mandi commodity prices via `data.gov.in`.
+  - **Zero-Cost Synergy:** Utilizes OpenWeather's Reverse Geocoding API to dynamically translate raw GPS coordinates into the strict text-based state/district format required by the Indian Government API, seamlessly bridging two incompatible systems.
+- 💬 **Krishi Charcha Forum** — A community discussion board for farmers to share tips, crop alerts, and ask questions.
 - 📺 **YouTube Learning Module** — fetches top relevant videos and allows tracking course progress
 - 🔐 Secure login and protected routes using **Clerk** authentication
 - 🔑 **BYOK Architecture (Bring Your Own Key)** — Gemini API keys are securely provided by users and stored only in their local browser storage, ensuring free hosting and no central API cost.
@@ -30,41 +34,53 @@ PRAGATI PATH is a full-stack web platform designed to assist Indian farmers by l
 ```mermaid
 flowchart TB
     subgraph Client ["Frontend Browser"]
-        UI["Dashboard UI"]
-        Storage["LocalStorage: BYOK Key"]
-        OfflineAI["Offline Fallback AI: LiteRT WebGPU"]
+        UI["Dashboard UI (Vanilla JS)"]
+        Storage["LocalStorage (BYOK Key)"]
+        OfflineAI["LiteRT WebGPU (MobileNetV3)"]
     end
 
-    subgraph Backend ["Bun Server"]
-        API["Express API Routes"]
+    subgraph Backend ["Bun + Express Server"]
+        API["API Proxy (aiSearch.js)"]
         AuthGuard["Clerk Middleware"]
-        DBHandler["Mongoose Handlers"]
+        DBHandler["Mongoose (DBHandler.js)"]
     end
 
     subgraph External ["External Services"]
         ClerkAuth["Clerk Identity"]
-        Gemini["Primary AI: Google Gemini 2.5"]
+        Gemini["Google Gemini 2.5"]
         MongoDB[("MongoDB Atlas")]
-        WeatherAPI["OpenWeather"]
+        WeatherAPI["OpenWeather Geo API"]
+        GovData["data.gov.in (APMC)"]
+        SoilGrids["SoilGrids API"]
+        OpenMeteo["Open-Meteo"]
         YouTubeAPI["YouTube Data V3"]
     end
 
-    UI -->|"JSON over HTTP"| API
-    API -->|"JSON Response"| UI
+    %% Frontend to Backend
+    UI -->|"lat/lon coordinates"| API
+    Storage -.->|"Injects X-Gemini-Key Header"| API
     
-    UI -->|"Login / Tokens"| ClerkAuth
-    UI -->|"Plant Disease (No Key)"| OfflineAI
+    %% Offline Fallback
+    UI -->|"Image Upload (No Key)"| OfflineAI
 
+    %% Auth & DB Flow
     API --> AuthGuard
-    AuthGuard -->|"Verify Session"| ClerkAuth
-    
-    API --> DBHandler
-    DBHandler --> MongoDB
-    MongoDB --> DBHandler
+    AuthGuard -->|"Verify Token"| ClerkAuth
+    API -->|"User Progress / Forum"| DBHandler
+    DBHandler <--> MongoDB
 
-    API -->|"Plant Disease / Chat / Tips (Requires Key)"| Gemini
-    API --> WeatherAPI
-    API --> YouTubeAPI
+    %% The Reverse Geocoding Bridge (Genius Workaround)
+    API -->|"1. Reverse Geocode lat/lon"| WeatherAPI
+    WeatherAPI -->|"2. Returns State/District"| API
+    API -->|"3. Query using State String"| GovData
+
+    %% Agronomy Intelligence Pipeline
+    API -->|"Fetch pH/Nitrogen"| SoilGrids
+    API -->|"Fetch 10-yr Climate"| OpenMeteo
+    API -->|"Bundled Soil+Weather JSON"| Gemini
+    
+    %% Video
+    API -->|"Search Queries"| YouTubeAPI
 ```
 
 ## 📦 Getting Started
@@ -91,7 +107,7 @@ CLERK_SIGN_UP_URL=/public/Accounts/signup.html
 MONGO_URI=your_mongodb_connection_string
 YOUTUBE_API_KEY=your_youtube_api_key
 OPENWEATHER_API_KEY=your_openweather_api_key
-SESSION_SECRET=your_secure_random_string
+GOV_DATA_API_KEY=your_gov_api_key
 ```
 
 ### Run the App

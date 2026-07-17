@@ -5,7 +5,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>PragatiPath</title>
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="style.css?v=5">
     <link rel="stylesheet" href="../Chat-Bot/chat-bot.css">
     <link rel="shortcut icon" href="../assets/plant.png" type="image/png">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
@@ -66,6 +66,14 @@
                             </svg>
                         </span>
                     </a></li>
+                <li class="links"><a class="nav-anchor" href="#" data-target="community"
+                        style="text-decoration: none;">
+                        <span>
+                            <svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="#fefae0">
+                                <path d="M280-80v-366q-51-14-85.5-56T160-596v-124q0-17 11.5-28.5T200-760h560q17 0 28.5 11.5T800-720v124q0 52-34.5 94T680-446v366H280Zm400-446q28 0 49-16.5t27-43.5l24-114H180l24 114q6 27 27 43.5t49 16.5q27 0 50.5-16.5T363-570q9 27 33.5 43.5T450-510q28 0 52.5-16.5T536-570q9 27 32.5 43.5T620-510q32 0 55.5-16.5T680-526Z" />
+                            </svg>
+                        </span>
+                    </a></li>
                 <li class="links"><a class="nav-anchor" href="#" data-target="contact" style="text-decoration: none;">
                         <span>
                             <svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px"
@@ -115,6 +123,14 @@
                                 fill="#fefae0">
                                 <path
                                     d="M480-200 200-480l280-280 280 280-280 280Zm0-114 166-166-166-166-166 166 166 166Zm0-166Z" />
+                            </svg>
+                        </span>
+                    </a></li>
+                <li class="link-dock"><a class="nav-anchor" href="#" data-target="community"
+                        style="text-decoration: none;">
+                        <span>
+                            <svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="#fefae0">
+                                <path d="M280-80v-366q-51-14-85.5-56T160-596v-124q0-17 11.5-28.5T200-760h560q17 0 28.5 11.5T800-720v124q0 52-34.5 94T680-446v366H280Zm400-446q28 0 49-16.5t27-43.5l24-114H180l24 114q6 27 27 43.5t49 16.5q27 0 50.5-16.5T363-570q9 27 33.5 43.5T450-510q28 0 52.5-16.5T536-570q9 27 32.5 43.5T620-510q32 0 55.5-16.5T680-526Z" />
                             </svg>
                         </span>
                     </a></li>
@@ -257,18 +273,72 @@
                         <button id="btn">Send</button>
                     </div>
                 </div>
+            </div> <!-- /.courses-main -->
         </section>
         <section id="ai-toolkit">
             <div class="ai-toolkit-heading">
-                <h1>AI Agriculture Toolkit</h1>
-                <p>Empowering farmers with smart tools</p>
+                <h1>My Farm</h1>
+                <p>Interactive Map & Agronomy Dashboard</p>
             </div>
             <div class="ai-toolkit-container">
+                <!-- 1. Interactive Map Card (The core of V2) -->
+                <div class="card" id="map-card" style="grid-column: 1 / -1;">
+                    <div class="plant-card-header">
+                        <h2>📍 Set Farm Location</h2>
+                    </div>
+                    <p style="font-size:0.85rem;color:#666;margin:0 0 10px;">Click anywhere on the map to drop a pin and set your farm's location. This powers our agronomy and weather predictions.</p>
+                    <div id="map" style="height: 300px; border-radius: 12px; border: 2px solid #66bb6a; margin-bottom: 10px;"></div>
+                    <div style="display:flex; justify-content:space-between; align-items:center;">
+                        <span id="map-status" style="font-size:0.9rem; color:#888;">No location set.</span>
+                        <button id="save-location-btn" style="background:#2e7d32; color:white; border:none; padding:8px 16px; border-radius:8px; cursor:pointer; font-weight:600; display:none;">Save Location</button>
+                    </div>
+                </div>
+
+                <!-- Agronomy & Intelligence Cards (Grid Layout) -->
+                <div id="agronomy-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(350px, 1fr)); gap: 20px; grid-column: 1 / -1; width: 100%;">
+                    
+                    <div class="card" id="weather-card">
+                        <h2>🌡️ Current Conditions</h2>
+                        <div id="weatherResult"><p style="color:#888;font-size:0.9rem">⏳ Waiting for location...</p></div>
+                        <div id="farming-tips-box"></div>
+                    </div>
+
+                    <div class="card" id="soil-card">
+                        <h2>🌱 Soil & Climate Analysis</h2>
+                        <p style="font-size:0.82rem;color:#888;margin:0 0 10px">Powered by SoilGrids & Open-Meteo</p>
+                        <div id="soilResult"><p style="color:#888;font-size:0.9rem">⏳ Waiting for location...</p></div>
+                    </div>
+
+                    <div class="card" id="crops-card">
+                        <h2>🌾 Recommended Crops</h2>
+                        <div id="cropsResult"><p style="color:#888;font-size:0.9rem">⏳ Waiting for location...</p></div>
+                    </div>
+
+                    <div class="card" id="fertilizer-card">
+                        <h2>🧪 Fertilizer & Care</h2>
+                        <div id="fertilizerResult"><p style="color:#888;font-size:0.9rem">⏳ Waiting for location...</p></div>
+                    </div>
+                    
+                    <div class="card" id="trends-card">
+                        <h2>📈 Market Trends</h2>
+                        <div id="trendsResult"><p style="color:#888;font-size:0.9rem">⏳ Waiting for location...</p></div>
+                    </div>
+
+                    <div class="card" id="pinned-crop-card">
+                        <h2>📌 Pinned Market Price</h2>
+                        <p style="font-size:0.82rem;color:#888;margin:0 0 10px">Pin a crop from the Market section to track it here.</p>
+                        <div id="pinnedCropResult"><p style="color:#888;font-size:0.9rem">No crop pinned.</p></div>
+                    </div>
+
+                </div>
+
+                <!-- 3. Plant Disease Analyzer -->
                 <div class="card" id="plant-card">
                     <div class="plant-card-header">
-                        <h2>🌿 Plant Disease Detection</h2>
+                        <h2>🌿 Farm Health Scanner</h2>
                         <span id="plant-mode-badge" class="plant-mode-badge"></span>
                     </div>
+                    <p style="font-size:0.82rem;color:#888;margin:0 0 10px">Scan diseased leaves instantly offline, or use Gemini for deep analysis.</p>
                     <div class="plant-upload-row">
                         <label class="plant-upload-btn" for="upload">📁 Choose Image</label>
                         <label class="plant-upload-btn plant-camera-btn" for="upload-camera">📷 Take Photo</label>
@@ -282,12 +352,13 @@
                     <div id="prediction"></div>
                 </div>
 
+                <!-- 4. Contextual Video Recommendations -->
                 <div class="card" id="yt-search-card">
-                    <h2>🎬 Farming Video Search</h2>
-                    <p style="font-size:0.82rem;color:#888;margin:0 0 10px">Find agricultural tutorials on YouTube</p>
+                    <h2>🎬 Recommended Videos</h2>
+                    <p style="font-size:0.82rem;color:#888;margin:0 0 10px">Auto-updates based on your crops and scanned diseases</p>
                     <div style="display:flex;gap:8px;margin-bottom:12px">
                         <input id="yt-search-input" type="text"
-                            placeholder="e.g. how to grow wheat, pest control..."
+                            placeholder="Search tutorials manually..."
                             style="flex:1;padding:8px 12px;border-radius:8px;border:1.5px solid #ddd;font-size:0.9rem"
                             onkeydown="if(event.key==='Enter') searchYouTube()">
                         <button onclick="searchYouTube()"
@@ -295,26 +366,77 @@
                             Search
                         </button>
                     </div>
-                    <div id="yt-results" style="display:flex;flex-direction:column;gap:10px;max-height:340px;overflow-y:auto"></div>
-                </div>
-
-                <div class="card">
-                    <h2>🌦️ Live Weather & Farming Tips</h2>
-                    <p style="font-size:0.82rem;color:#888;margin:0 0 10px">Auto-loads with your location. Gemini tips when key is set.</p>
-                    <div id="weatherResult"><p style="color:#888;font-size:0.9rem">⏳ Fetching location...</p></div>
-                </div>
-
-                <div class="card">
-                    <h2>Field Map & Location</h2>
-                    <div id="map"></div>
+                    <div id="yt-results" style="display:flex;flex-direction:column;gap:10px;max-height:340px;overflow-y:auto">
+                        <p style="color:#888;font-size:0.9rem">Drop a pin or scan a leaf to get video recommendations...</p>
+                    </div>
                 </div>
             </div>
         </section>
+
+        <!-- PHASE 5: Live Mandi & Community Forum -->
+        <section id="community" style="display:none;">
+            <div class="ai-toolkit-heading">
+                <h1>Market & Community</h1>
+                <p>Track Live APMC Prices & Discuss with Fellow Farmers</p>
+            </div>
+
+            <!-- Sub-section Tabs -->
+            <div class="community-tabs">
+                <button class="comm-tab active" id="tab-mandi" onclick="showCommTab('mandi')">📊 Live Mandi Prices</button>
+                <button class="comm-tab" id="tab-forum" onclick="showCommTab('forum')">💬 Krishi Charcha</button>
+            </div>
+
+            <!-- Mandi Sub-page -->
+            <div id="comm-mandi" class="comm-page">
+                <div style="max-width:900px; margin:0 auto; padding:0 20px;">
+                    <div class="card" id="mandi-card" style="max-height:none;">
+                        <h2>📊 Live Mandi Prices</h2>
+                        <p style="font-size:0.85rem;color:#888;margin:0 0 15px">Sourced from data.gov.in · Real-time APMC data · Pin 📌 a crop to track it on your Farm Dashboard.</p>
+                        <div id="mandiResult"><p style="color:#888;font-size:0.9rem">⏳ Pin a location on your Farm Map first to fetch local market prices.</p></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Forum Sub-page -->
+            <div id="comm-forum" class="comm-page" style="display:none;">
+                <div style="max-width:900px; margin:0 auto; padding:0 20px 40px;">
+
+                    <!-- New Post Form -->
+                    <div class="card" style="max-height:none; margin-bottom:24px;">
+                        <h2 style="margin-top:0;">✍️ Start a Discussion</h2>
+                        <div style="display:flex; flex-direction:column; gap:12px;">
+                            <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                                <select id="forum-tag" style="padding:8px 12px; border-radius:8px; border:1.5px solid #ddd; font-size:0.9rem; background:#fff; cursor:pointer;">
+                                    <option value="Question">❓ Question</option>
+                                    <option value="Tip">💡 Tip</option>
+                                    <option value="Alert">⚠️ Alert</option>
+                                    <option value="Scheme">🏛️ Govt Scheme</option>
+                                </select>
+                            </div>
+                            <input id="forum-title" type="text" maxlength="150" placeholder="Title (e.g. Best time to sow wheat in Punjab?)"
+                                style="padding:10px 14px; border-radius:8px; border:1.5px solid #ddd; font-size:0.95rem; width:100%; box-sizing:border-box;">
+                            <textarea id="forum-body" maxlength="2000" rows="4" placeholder="Share your question, tip, or experience..."
+                                style="padding:10px 14px; border-radius:8px; border:1.5px solid #ddd; font-size:0.9rem; width:100%; box-sizing:border-box; resize:vertical;"></textarea>
+                            <div style="display:flex; justify-content:flex-end;">
+                                <button onclick="submitForumPost()" style="padding:10px 24px; background:#2e7d32; color:white; border:none; border-radius:8px; font-size:0.95rem; cursor:pointer; font-weight:600;">🌱 Post</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Posts Feed -->
+                    <div id="forum-feed">
+                        <p style="color:#888; text-align:center;">⏳ Loading discussions...</p>
+                    </div>
+                </div>
+            </div>
+
+        </section>
+
         <!-- contact  -->
         <section class="contact conatiner" id="contact">
             <h2 class="heading">Contact</h2>
             <!-- contact form  -->
-            <form action="" class="contact-form" id="conatct-form">
+            <form action="" class="contact-form" id="contact-form">
                 <input type="text" placeholder="Your Name" class="name" required>
                 <input type="email" name="" id="" placeholder="Email adress" class="email" required>
                 <textarea name="" id="" cols="30" rows="10" placeholder="Enter Your Message" class="message"
@@ -323,10 +445,9 @@
             </form>
         </section>
     </main>
-    </section>
     <!-- email js  -->
     <script type="text/javascript" src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
-    <script src="https://unpkg.com/sweetalert/dist/sweetalert.min.js"></script>
+
 
     <script type="text/javascript">
         (function () {
@@ -348,7 +469,7 @@
         }
     </script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/15.0.7/marked.min.js"></script>
-    <script src="script.js"></script>
+    <script src="script.js?v=20"></script>
     <script src="../Chat-Bot/chat-bot.js" defer></script>
 </body>
 

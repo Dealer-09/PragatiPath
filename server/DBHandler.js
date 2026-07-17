@@ -24,7 +24,12 @@ const userSchema = new mongoose.Schema({
             progress: { type: Number, required: true, default: 0 }
         }], default: []
     },
-    completedCourses: { type: [String], default: [] }
+    completedCourses: { type: [String], default: [] },
+    location: {
+        lat: { type: Number },
+        lng: { type: Number }
+    },
+    imageUrl: { type: String, default: '' }
 });
 
 const Users = mongoose.model('users', userSchema);
@@ -45,7 +50,8 @@ async function middleware_userAuth(req, res, next) {
                     name: username,
                     fullName: `${userData.firstName || ''} ${userData.lastName || ''}`.trim(),
                     enrolledCourses: [],
-                    completedCourses: []
+                    completedCourses: [],
+                    imageUrl: userData.imageUrl || ''
                 });
                 await userStore.save();
             }
@@ -65,13 +71,13 @@ async function endpoint_userInfo(req, res) {
         );
         if (!userDbStore) return res.status(404).json({ error: "User not found" });
 
-        const uinfo = await clerk.clerkClient.users.getUser(req.auth.userId);
         res.json({
             name: userDbStore.name,
             fullName: userDbStore.fullName,
             enrolledCourses: userDbStore.enrolledCourses,
             completedCourses: userDbStore.completedCourses,
-            imgUrl: uinfo.imageUrl
+            location: userDbStore.location,
+            imgUrl: userDbStore.imageUrl
         });
     } catch (error) {
         console.error("[UserDB] endpoint_userInfo failed:", error.message);
@@ -84,22 +90,41 @@ async function endpoint_addCourse(req, res) {
         const { courseName } = req.body;
         if (!courseName) return res.status(400).json({ error: "Course name is required" });
 
-        // Check if already enrolled (avoid duplicates — $addToSet only works for primitives)
-        const existing = await Users.findOne({
-            userId: req.auth.userId,
-            'enrolledCourses.name': courseName
-        });
-        if (existing) return res.json({ alreadyEnrolled: true });
-
+        // Atomic update to avoid race conditions (no duplicates)
         const userDbStore = await Users.findOneAndUpdate(
-            { userId: req.auth.userId },
+            { userId: req.auth.userId, 'enrolledCourses.name': { $ne: courseName } },
             { $push: { enrolledCourses: { name: courseName, progress: 0 } } },
             { new: true }
         );
-        if (!userDbStore) return res.status(404).json({ error: "User not found" });
+        if (!userDbStore) {
+            // Either user not found, or already enrolled
+            const existing = await Users.findOne({ userId: req.auth.userId });
+            if (!existing) return res.status(404).json({ error: "User not found" });
+            return res.json({ alreadyEnrolled: true });
+        }
         res.json(userDbStore);
     } catch (error) {
         console.error("[UserDB] endpoint_addCourse failed:", error.message);
+        res.status(500).json({ error: "Internal server error" });
+    }
+}
+
+async function endpoint_saveLocation(req, res) {
+    try {
+        const { lat, lng } = req.body;
+        if (typeof lat !== 'number' || typeof lng !== 'number') {
+            return res.status(400).json({ error: "Valid latitude and longitude required" });
+        }
+        
+        const userDbStore = await Users.findOneAndUpdate(
+            { userId: req.auth.userId },
+            { $set: { "location.lat": lat, "location.lng": lng } },
+            { new: true }
+        );
+        if (!userDbStore) return res.status(404).json({ error: "User not found" });
+        res.json({ success: true, location: userDbStore.location });
+    } catch (error) {
+        console.error("[UserDB] endpoint_saveLocation failed:", error.message);
         res.status(500).json({ error: "Internal server error" });
     }
 }
@@ -199,28 +224,82 @@ async function endpoint_getCourseByName(req, res) {
     }
 }
 
-async function endpoint_getCourseById(req, res) {
-    try {
-        const { courseId } = req.params;
-        if (!courseId) return res.status(400).json({ error: "Course ID is required" });
 
-        // Validate ObjectId format before querying to avoid CastError
-        if (!mongoose.Types.ObjectId.isValid(courseId)) {
-            return res.status(400).json({ error: "Invalid course ID format" });
+// ── Krishi Charcha Forum ──────────────────────────────────────────────────────
+const forumPostSchema = new mongoose.Schema({
+    authorId:   { type: String, required: true },
+    authorName: { type: String, required: true },
+    authorImg:  { type: String, default: '' },
+    tag:        { type: String, enum: ['Question', 'Tip', 'Alert', 'Scheme'], default: 'Question' },
+    title:      { type: String, required: true, maxlength: 150 },
+    body:       { type: String, required: true, maxlength: 2000 },
+    likes:      { type: [String], default: [] }, // array of userIds who liked
+    createdAt:  { type: Date, default: Date.now }
+});
+
+const ForumPost = mongoose.model('forum_posts', forumPostSchema);
+
+async function endpoint_getForumPosts(req, res) {
+    try {
+        const posts = await ForumPost.find()
+            .sort({ createdAt: -1 })
+            .limit(50)
+            .lean();
+        res.json(posts);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+}
+
+async function endpoint_createForumPost(req, res) {
+    try {
+        const { tag, title, body } = req.body;
+        if (!title || !body) return res.status(400).json({ error: 'Title and body are required.' });
+
+        const user  = await Users.findOne({ userId: req.auth.userId });
+        const post  = await ForumPost.create({
+            authorId:   req.auth.userId,
+            authorName: user?.name || 'Farmer',
+            authorImg:  user?.imageUrl || '',
+            tag:        tag || 'Question',
+            title:      String(title).slice(0, 150),
+            body:       String(body).slice(0, 2000)
+        });
+        res.json(post);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+}
+
+async function endpoint_likeForumPost(req, res) {
+    try {
+        const { postId } = req.params;
+        const userId = req.auth.userId;
+
+        if (!mongoose.Types.ObjectId.isValid(postId)) {
+            return res.status(400).json({ error: "Invalid post ID format" });
         }
 
-        const course = await Courses.findOne({ _id: courseId }, { _id: 0, __v: 0 });
-        if (!course) return res.status(404).json({ error: "Course not found" });
-        res.json(course);
-    } catch (error) {
-        console.error("[CourseDB] endpoint_getCourseById failed:", error.message);
-        res.status(500).json({ error: "Internal server error" });
+        const post = await ForumPost.findById(postId);
+        if (!post) return res.status(404).json({ error: 'Post not found.' });
+
+        const alreadyLiked = post.likes.includes(userId);
+        if (alreadyLiked) {
+            post.likes.pull(userId);
+        } else {
+            post.likes.push(userId);
+        }
+        await post.save();
+        res.json({ likes: post.likes.length, liked: !alreadyLiked });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
     }
 }
 
 module.exports = { 
     connectDB, 
     Users, Courses,
-    middleware_userAuth, endpoint_userInfo, endpoint_addCourse, endpoint_removeCourse, endpoint_updateCourseProgress,
-    endpoint_getCourseList, endpoint_getCourseByName, endpoint_getCourseById
+    middleware_userAuth, endpoint_userInfo, endpoint_saveLocation, endpoint_addCourse, endpoint_removeCourse, endpoint_updateCourseProgress,
+    endpoint_getCourseList, endpoint_getCourseByName,
+    endpoint_createForumPost, endpoint_getForumPosts, endpoint_likeForumPost
 };

@@ -33,7 +33,9 @@ async function fetchCourseData() {
         return;
     }
 
-    const response = await fetch(window.location.origin + `/api/getcourse/name/${name}`);
+    const response = await fetch(window.location.origin + `/api/getcourse/name/${encodeURIComponent(name)}`, {
+        credentials: 'same-origin'
+    });
     const data = await response.json();
     if (data.error) {
         window.location.href = window.location.origin + '/private/Dashboard/dashboard.html';
@@ -45,10 +47,14 @@ async function fetchCourseData() {
     document.getElementById('course-lang').textContent  = data.medium;
 
     const container = document.querySelector('.video-preview');
+    // Sanitize playlist ID — must be alphanumeric/hyphens/underscores only (YouTube format)
+    const rawPlaylist = localStorage.getItem("coursePlaylist") || '';
+    const safePlaylist = rawPlaylist.replace(/[^a-zA-Z0-9_-]/g, '');
+
     container.innerHTML = `
         <iframe id="yt-player" class="course-data"
-            src="https://www.youtube.com/embed/videoseries?list=${localStorage.getItem("coursePlaylist")}&enablejsapi=1"
-            title="${data.name}"
+            src="https://www.youtube.com/embed/videoseries?list=${safePlaylist}&enablejsapi=1"
+            title="${data.name.replace(/"/g, '&quot;')}"
             frameborder="0"
             allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
             referrerpolicy="strict-origin-when-cross-origin"
@@ -60,7 +66,9 @@ async function fetchCourseData() {
     if (ytAPIReady) initPlayer();
 
     try {
-        const chres  = await fetch(window.location.origin + `/api/youtubechannel/${localStorage.getItem("coursePlaylist")}`);
+        const chres  = await fetch(window.location.origin + `/api/youtubechannel/${safePlaylist}`, {
+            credentials: 'same-origin'
+        });
         const chdata = await chres.json();
         if (!chdata.error) {
             document.getElementById('channel-img').src         = chdata.channelThumbnail;
@@ -125,6 +133,7 @@ async function reportProgress(deltaSeconds) {
     try {
         await fetch('/api/updcourseprog', {
             method:  'POST',
+            credentials: 'same-origin',
             headers: { 'Content-Type': 'application/json' },
             body:    JSON.stringify({ courseName, progress: percentIncrement })
         });
@@ -184,7 +193,7 @@ window.addEventListener('load', async () => {
     }
 
     try {
-        const res         = await fetch('/api/userinfo');
+        const res         = await fetch('/api/userinfo', { credentials: 'same-origin' });
         const contentType = res.headers.get('content-type');
         if (contentType && contentType.includes('application/json')) {
             const data = await res.json();

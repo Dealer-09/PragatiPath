@@ -189,4 +189,186 @@ async function endpoint_chatbot(req, res) {
     }
 }
 
-module.exports = { endpoint_openWeatherAPI, endpoint_geminiYoutubeSearch, endpoint_youtubePlaylistImg, endpoint_getChannelInfo, endpoint_chatbot };
+// ── Phase 2: Agronomy Data Pipeline (SoilGrids + Open-Meteo) ─────────────────
+async function endpoint_getAgronomyData(req, res) {
+    const { lat, lon } = req.params;
+    if (!lat || !lon) return res.status(400).json({ error: "Missing lat/lon parameters" });
+
+    try {
+        // 1. Fetch SoilGrids Data (0-5cm depth, mean values)
+        // Properties: phh2o (pH), soc (Soil Organic Carbon), sand, silt, clay
+        const soilUrl = `https://rest.isric.org/soilgrids/v2.0/properties/query?lon=${lon}&lat=${lat}&property=phh2o&property=soc&property=sand&property=silt&property=clay&depth=0-5cm&value=mean`;
+        
+        // 2. Fetch Open-Meteo Historical Data (Last 5 years for a quick snapshot average)
+        const date = new Date();
+        const endYear = date.getFullYear() - 1;
+        const startYear = endYear - 5;
+        const meteoUrl = `https://archive-api.open-meteo.com/v1/archive?latitude=${lat}&longitude=${lon}&start_date=${startYear}-01-01&end_date=${endYear}-12-31&daily=temperature_2m_mean,precipitation_sum&timezone=auto`;
+
+        // Fetch concurrently
+        const [soilRes, meteoRes] = await Promise.all([
+            fetch(soilUrl),
+            fetch(meteoUrl)
+        ]);
+
+        const soilData = await soilRes.json();
+        const meteoData = await meteoRes.json();
+
+        // Extract and simplify soil data
+        const soilProps = {};
+        if (soilData.properties && soilData.properties.layers) {
+            soilData.properties.layers.forEach(layer => {
+                const name = layer.name;
+                const depthData = layer.depths && layer.depths[0]; // 0-5cm
+                if (depthData && depthData.values && depthData.values.mean !== undefined) {
+                    // SoilGrids values are scaled (pH is *10, others are *10 or similar depending on property)
+                    // We just pass the raw/mean value to Gemini with context
+                    soilProps[name] = depthData.values.mean;
+                }
+            });
+        }
+
+        // Extract and simplify weather data (calculate 5-year averages)
+        let avgTemp = null;
+        let avgYearlyPrecip = null;
+        
+        if (meteoData.daily && meteoData.daily.temperature_2m_mean) {
+            const temps = meteoData.daily.temperature_2m_mean.filter(t => t !== null);
+            avgTemp = temps.length ? (temps.reduce((a, b) => a + b, 0) / temps.length).toFixed(1) : null;
+        }
+        if (meteoData.daily && meteoData.daily.precipitation_sum) {
+            const rain = meteoData.daily.precipitation_sum.filter(r => r !== null);
+            const totalRain = rain.reduce((a, b) => a + b, 0);
+            avgYearlyPrecip = rain.length ? (totalRain / 5).toFixed(0) : null; // total over 5 years / 5
+        }
+
+        const agronomyProfile = {
+            coordinates: { lat: parseFloat(lat), lon: parseFloat(lon) },
+            soil: soilProps,
+            climate: {
+                average_temp_celsius: avgTemp,
+                average_yearly_rainfall_mm: avgYearlyPrecip
+            }
+        };
+
+        res.json(agronomyProfile);
+
+    } catch (err) {
+        console.error("[AgronomyData] Error fetching data:", err);
+        res.status(500).json({ error: "Failed to fetch agronomy data" });
+    }
+}
+
+// ── Phase 3: Gemini Agronomy Intelligence Engine ─────────────────────────────
+async function endpoint_geminiAgronomyIntelligence(req, res) {
+    const key = req.headers['x-gemini-key'];
+    if (!key) return res.status(400).json({ error: 'No Gemini API key provided.' });
+
+    const { soilData, climateData, currentWeather, scannedCrop } = req.body;
+    if (!soilData || !climateData) {
+        return res.status(400).json({ error: 'Missing soil or climate data.' });
+    }
+
+    try {
+        const ai = new GoogleGenerativeAI(key);
+        const model = ai.getGenerativeModel({ model: 'gemini-2.5-flash' });
+
+        const prompt = `
+You are an expert, highly conservative Indian agronomist. 
+Analyze the following highly localized data for a farmer's plot:
+
+1. Soil Data (0-5cm mean): ${JSON.stringify(soilData)}
+(Note: phh2o is pH * 10. sand/silt/clay are in g/kg, so divide by 10 for percentage).
+2. Historical Climate (5-year averages): ${JSON.stringify(climateData)}
+3. Current Weather: ${JSON.stringify(currentWeather)}
+4. Crop currently grown (if any): ${scannedCrop ? scannedCrop : 'Unknown / Not provided'}
+
+Based on this data, provide a comprehensive, actionable agricultural plan.
+CRITICAL RULE: DO NOT predict exact yield volumes or profits to avoid liability. Provide general market trends and scientific recommendations.
+
+Respond ONLY with a valid JSON object matching this exact schema, no markdown formatting:
+{
+  "soil_health_summary": "1-2 sentence analysis of their soil",
+  "climate_weather_risks": "1-2 sentences on risks based on historical climate + current weather",
+  "recommended_crops": [
+    { "name": "Crop Name", "reason": "Why it fits the soil/climate" }
+  ],
+  "not_recommended_crops": [
+    { "name": "Crop Name", "reason": "Why it would fail here" }
+  ],
+  "active_crop_advice": "If they provided a scanned crop, give specific advice for it based on this soil/weather. If none, say 'No active crop scanned.'",
+  "fertilizer_recommendations": "Specific composition advice (e.g., NPK ratios, organic matter) based on the soil data",
+  "pesticide_insecticide_advice": "Common regional pests for the recommended/active crops and safe chemical/organic interventions",
+  "market_trends": "Expected general market demand and price trends for the recommended crops in India"
+}
+`;
+
+        const result = await model.generateContent(prompt);
+        let text = result.response.text().trim()
+            .replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```$/i, '');
+        
+        const parsed = JSON.parse(text);
+        res.json(parsed);
+    } catch (err) {
+        console.error("[Gemini Agronomy] Error:", err.message);
+        res.status(500).json({ error: err.message });
+    }
+}
+
+// ── Phase 4: Live Mandi Prices (data.gov.in) ──────────────────────────────────
+async function endpoint_getMandiPrices(req, res) {
+    const { lat, lon } = req.params;
+    if (!lat || !lon) return res.status(400).json({ error: "Missing lat/lon parameters" });
+
+    try {
+        // 1. Reverse Geocode using OpenWeather
+        const geoUrl = `http://api.openweathermap.org/geo/1.0/reverse?lat=${lat}&lon=${lon}&limit=1&appid=${process.env.OPENWEATHER_API_KEY}`;
+        const geoRes = await fetch(geoUrl);
+        const geoData = await geoRes.json();
+
+        if (!geoData || geoData.length === 0) {
+            return res.status(404).json({ error: "Could not determine state from coordinates." });
+        }
+
+        const state = geoData[0].state; // e.g. "West Bengal"
+        const district = geoData[0].name; // e.g. "Bally"
+
+        // 2. Fetch Mandi Prices from data.gov.in
+        const govKey = process.env.GOV_DATA_API_KEY;
+        if (!govKey) {
+            return res.status(500).json({ error: "GOV_DATA_API_KEY is not configured on the server." });
+        }
+
+        // data.gov.in dataset for Current Daily Price of Various Commodities from Various Markets (Mandi)
+        // Dataset ID: 9ef84268-d588-465a-a308-a864a43d0070
+        const mandiUrl = `https://api.data.gov.in/resource/9ef84268-d588-465a-a308-a864a43d0070?api-key=${govKey}&format=json&filters[state]=${encodeURIComponent(state)}&limit=15`;
+        
+        const mandiRes = await fetch(mandiUrl);
+        const mandiData = await mandiRes.json();
+
+        if (!mandiData || !mandiData.records) {
+            return res.json({ state, district, records: [] });
+        }
+
+        res.json({
+            state,
+            district,
+            records: mandiData.records
+        });
+
+    } catch (err) {
+        console.error("[Mandi API] Error:", err);
+        res.status(500).json({ error: "Failed to fetch Mandi prices." });
+    }
+}
+
+module.exports = {
+    endpoint_getChannelInfo,
+    endpoint_youtubePlaylistImg,
+    endpoint_geminiYoutubeSearch,
+    endpoint_openWeatherAPI,
+    endpoint_chatbot,
+    endpoint_getAgronomyData,
+    endpoint_geminiAgronomyIntelligence,
+    endpoint_getMandiPrices
+};

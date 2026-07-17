@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Signin</title>
+    <title>Sign Up</title>
     <!-- Poppins font -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -33,7 +33,29 @@
         try {
             await Clerk.load()
             Clerk.mountSignUp(document.getElementById("signupDiv"), {
-                redirectUrl: window.location.origin + "/private/Dashboard/dashboard.html"
+                redirectUrl: window.location.origin + "/private/Dashboard/dashboard.html",
+                appearance: {
+                    variables: {
+                        colorPrimary: '#2e7d32',
+                        colorBackground: '#fefae0',
+                        colorText: '#1b5e20',
+                        colorInputBackground: '#fefae0',
+                        colorInputText: '#1b5e20',
+                        colorTextOnPrimaryBackground: '#ffffff',
+                        fontFamily: '"Poppins", sans-serif',
+                        borderRadius: '12px'
+                    },
+                    elements: {
+                        cardBox: {
+                            border: '2px solid #2e7d32',
+                            borderRadius: '12px',
+                            boxShadow: '0 8px 32px rgba(46, 125, 50, 0.2)'
+                        },
+                        formFieldInput: {
+                            border: '1px solid #2e7d32'
+                        }
+                    }
+                }
             });
         } catch (error) {
             console.error("Clerk failed to load:", error);

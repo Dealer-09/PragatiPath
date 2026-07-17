@@ -1,7 +1,94 @@
 const logoutBtn = document.querySelector(".logout-btn");
 const logoutIcon = document.querySelector("#logout-icon");
+const logoutIconDock = document.querySelector("#logout-icon-dock");
+
+// ── Always send session cookies so Clerk auth works on every API call ──────────
+// Without this, protected routes return an HTML sign-in redirect
+// and JSON.parse fails with "Unexpected token '<'".
+const _nativeFetch = window.fetch;
+window.fetch = function(url, opts = {}) {
+    if (typeof url === 'string' && url.startsWith('/api')) {
+        opts = { credentials: 'same-origin', ...opts };
+    }
+    return _nativeFetch(url, opts);
+};
 
 let userData = null;
+let _lastScannedCrop = null;
+let _lastWeatherData = null; // populated after each weather fetch, used by getWeather() button
+
+// ── Pinned Crops Logic (multi-pin) ──────────────────────────────────────────────
+const PINNED_KEY = 'pragati_pinned_crops_v2';
+
+function getPinnedCrops() {
+    try { return JSON.parse(localStorage.getItem(PINNED_KEY)) || []; }
+    catch { return []; }
+}
+
+window.pinCrop = function(commodity, minPrice, maxPrice, market) {
+    const pins = getPinnedCrops();
+    const alreadyPinned = pins.findIndex(p => p.commodity === commodity && p.market === market);
+    if (alreadyPinned !== -1) {
+        alert(`ℹ️ ${commodity} from ${market} is already pinned.`);
+        return;
+    }
+    pins.push({ commodity, minPrice, maxPrice, market, timestamp: Date.now() });
+    localStorage.setItem(PINNED_KEY, JSON.stringify(pins));
+    renderPinnedCrop();
+    // Brief toast instead of blocking alert
+    showToast(`📌 ${commodity} pinned to Farm Dashboard!`);
+};
+
+window.unpinCrop = function(index) {
+    const pins = getPinnedCrops();
+    pins.splice(index, 1);
+    localStorage.setItem(PINNED_KEY, JSON.stringify(pins));
+    renderPinnedCrop();
+};
+
+window.renderPinnedCrop = function() {
+    const pinnedDiv = document.getElementById('pinnedCropResult');
+    if (!pinnedDiv) return;
+
+    const pins = getPinnedCrops();
+    if (pins.length === 0) {
+        pinnedDiv.innerHTML = '<p style="color:#888;font-size:0.9rem">📌 No crops pinned yet. Go to Market section and pin from Mandi prices.</p>';
+        return;
+    }
+
+    pinnedDiv.innerHTML = pins.map((data, i) => `
+        <div style="display:flex; align-items:center; justify-content:space-between; background:rgba(255,255,255,0.6); padding:10px 14px; border-radius:10px; border:1px solid #c8e6c9; margin-bottom:8px;">
+            <div>
+                <strong style="color:#2e7d32; font-size:0.95rem;">${escapeHtml(data.commodity)}</strong>
+                <p style="margin:2px 0 0; font-size:0.78rem; color:#888;">&#128205; ${escapeHtml(data.market)}</p>
+            </div>
+            <div style="text-align:right;">
+                <div style="font-size:0.85rem;"><span style="color:#2e7d32; font-weight:700;">&#8377;${data.minPrice}</span> – <span style="color:#c00; font-weight:700;">&#8377;${data.maxPrice}</span> /kg</div>
+                <button onclick="unpinCrop(${i})" style="margin-top:5px; padding:2px 10px; font-size:0.75rem; border:none; background:#ffcdd2; color:#c62828; border-radius:20px; cursor:pointer;">✕ Unpin</button>
+            </div>
+        </div>
+    `).join('');
+};
+
+// Non-blocking toast notification
+function showToast(msg) {
+    let toast = document.getElementById('pragati-toast');
+    if (!toast) {
+        toast = document.createElement('div');
+        toast.id = 'pragati-toast';
+        toast.style.cssText = 'position:fixed;bottom:30px;left:50%;transform:translateX(-50%);background:#2e7d32;color:#fff;padding:10px 22px;border-radius:30px;font-size:0.9rem;font-weight:600;z-index:9999;box-shadow:0 4px 20px rgba(0,0,0,0.2);transition:opacity 0.4s;';
+        document.body.appendChild(toast);
+    }
+    toast.textContent = msg;
+    toast.style.opacity = '1';
+    clearTimeout(toast._timer);
+    toast._timer = setTimeout(() => { toast.style.opacity = '0'; }, 2500);
+}
+
+// Call on initial load
+document.addEventListener('DOMContentLoaded', () => {
+    renderPinnedCrop();
+});
 
 // ── BYOK: Gemini API Key Management ──────────────────────────────────────────
 function getGeminiKey() {
@@ -56,10 +143,12 @@ function clearGeminiKey() {
 
 logoutBtn.addEventListener('mouseenter', () => {
     logoutIcon.setAttribute('fill', 'red');
+    if (logoutIconDock) logoutIconDock.setAttribute('fill', 'red');
 });
 
 logoutBtn.addEventListener('mouseleave', () => {
     logoutIcon.setAttribute('fill', '#fefae0');
+    if (logoutIconDock) logoutIconDock.setAttribute('fill', '#fefae0');
 });
 
 const taskBox = document.getElementById("task-box");
@@ -263,6 +352,7 @@ function setupChat() {
         try {
             const res  = await fetch('/api/gemini/chat', {
                 method: 'POST',
+                credentials: 'same-origin',
                 headers: geminiHeaders(),
                 body: JSON.stringify({ query: message })
             });
@@ -293,6 +383,7 @@ async function unenrollCourse(button) {
     try {
         const res = await fetch('/api/removecourse', {
             method: 'POST',
+            credentials: 'same-origin',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ courseName: button.dataset.coursename })
         });
@@ -322,7 +413,7 @@ async function courseShortHandler(button) {
 // Initialize everything when the page loads
 window.addEventListener('load', async () => {
     try {
-        const req = await fetch('/api/userinfo');
+        const req = await fetch('/api/userinfo', { credentials: 'same-origin' });
         
         const contentType = req.headers.get("content-type");
         if (!contentType || !contentType.includes("application/json")) {
@@ -361,7 +452,7 @@ window.addEventListener('load', async () => {
             let courseName = enrollment.name;
             const progress = enrollment.progress;
 
-            const courseRes  = await fetch(`/api/getcourse/name/${courseName}`);
+            const courseRes  = await fetch(`/api/getcourse/name/${courseName}`, { credentials: 'same-origin' });
             const courseCT   = courseRes.headers.get('content-type');
             if (!courseCT || !courseCT.includes('application/json')) continue; // session expired mid-render
             const courseData = await courseRes.json();
@@ -369,7 +460,7 @@ window.addEventListener('load', async () => {
 
             let imgSrc = '';
             try {
-                const imgRes  = await fetch(window.location.origin + `/api/youtubethumb/${courseData.playlist}`);
+                const imgRes  = await fetch(window.location.origin + `/api/youtubethumb/${courseData.playlist}`, { credentials: 'same-origin' });
                 const imgCT   = imgRes.headers.get('content-type');
                 if (imgCT && imgCT.includes('application/json')) {
                     const imgData = await imgRes.json();
@@ -379,16 +470,19 @@ window.addEventListener('load', async () => {
 
             const courseCard = document.createElement('div');
             courseCard.classList.add('dashboard-course-card');
+            // Escape text content to prevent XSS from malicious DB data
+            const escapedName = courseName.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+            const escapedDesc = (courseData.description || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
             courseCard.innerHTML = `
-                <img src="${imgSrc}" alt="${courseName}" />
-                <h2>${courseName}</h2>
-                <p>${courseData.description}</p>
+                <img src="${imgSrc}" alt="${escapedName}" />
+                <h2>${escapedName}</h2>
+                <p>${escapedDesc}</p>
                 <div class="course-progress">
                     <div class="course-progress-bar" style="width:${Math.min(progress, 100)}%"></div>
                 </div>
                 <span class="progress-label">${Math.min(Math.round(progress), 100)}% complete</span>
-                <button onclick="courseShortHandler(this);" data-coursename="${courseName}" data-courseplaylist="${courseData.playlist}" data-courseid="${courseData._id}">▶ Watch</button>
-                <button onclick="unenrollCourse(this);" data-coursename="${courseName}">Unenroll</button>
+                <button onclick="courseShortHandler(this);" data-coursename="${escapedName}" data-courseplaylist="${courseData.playlist}" data-courseid="${courseData._id}">▶ Watch</button>
+                <button onclick="unenrollCourse(this);" data-coursename="${escapedName}">Unenroll</button>
             `;
             mycoursesContainer.appendChild(courseCard);
         }
@@ -445,24 +539,151 @@ function showSection(targetId) {
     });
     document.getElementById(targetId).style.display = 'block';
 
+    // Reset scroll position when switching sections
+    const container = document.querySelector('.container');
+    if (container) container.scrollTop = 0;
+
     // Lazy-init the Leaflet map the first time ai-toolkit section is shown
     if (targetId === 'ai-toolkit') {
         getLocationAndStart();
     }
+    // Load forum posts when navigating to community
+    if (targetId === 'community') {
+        _forumLoaded = false; // always re-fetch on navigation so new posts appear
+        loadForumPosts();
+    }
 }
+
+// ── Community: Tab switcher ───────────────────────────────────────────────────
+window.showCommTab = function(tab) {
+    document.getElementById('comm-mandi').style.display  = tab === 'mandi' ? 'block' : 'none';
+    document.getElementById('comm-forum').style.display  = tab === 'forum' ? 'block' : 'none';
+    document.querySelectorAll('.comm-tab').forEach(btn => btn.classList.remove('active'));
+    document.getElementById(`tab-${tab}`).classList.add('active');
+    if (tab === 'forum') loadForumPosts();
+};
+
+// ── Krishi Charcha Forum ──────────────────────────────────────────────────────
+let _forumLoaded = false;
+
+async function loadForumPosts(force = false) {
+    const feed = document.getElementById('forum-feed');
+    if (!feed) return;
+    if (_forumLoaded && !force) return; // don't re-fetch unless forced
+    feed.innerHTML = '<p style="color:#888; text-align:center;">⏳ Loading discussions...</p>';
+    try {
+        const res = await fetch('/api/forum/posts', { credentials: 'same-origin' });
+        const posts = await res.json();
+        if (!Array.isArray(posts) || posts.length === 0) {
+            feed.innerHTML = '<p style="color:#888; text-align:center;">🌱 No discussions yet. Be the first to post!</p>';
+            _forumLoaded = true;
+            return;
+        }
+        feed.innerHTML = posts.map(p => renderForumPost(p)).join('');
+        _forumLoaded = true;
+    } catch (err) {
+        feed.innerHTML = `<p style="color:#c00; text-align:center;">Failed to load posts: ${err.message}</p>`;
+    }
+}
+
+function renderForumPost(p) {
+    const timeAgo = formatTimeAgo(new Date(p.createdAt));
+    const likeCount = (p.likes || []).length;
+    const avatar = p.authorImg
+        ? `<img src="${p.authorImg}" alt="" class="forum-post-avatar">`
+        : `<div class="forum-post-avatar" style="display:flex;align-items:center;justify-content:center;font-size:1.1rem;background:#c8e6c9;">🌾</div>`;
+    return `
+    <div class="forum-post" id="post-${p._id}">
+        <div class="forum-post-header">
+            ${avatar}
+            <div>
+                <strong style="font-size:0.9rem; color:#2e7d32;">${escapeHtml(p.authorName)}</strong>
+                <span style="color:#aaa; font-size:0.78rem; margin-left:8px;">${timeAgo}</span>
+            </div>
+            <span class="forum-tag ${p.tag}">${p.tag}</span>
+        </div>
+        <p class="forum-post-title">${escapeHtml(p.title)}</p>
+        <p class="forum-post-body">${escapeHtml(p.body)}</p>
+        <div class="forum-post-meta">
+            <button class="forum-like-btn" onclick="likePost('${p._id}', this)">❤️ ${likeCount}</button>
+        </div>
+    </div>`;
+}
+
+function escapeHtml(text) {
+    return String(text).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function formatTimeAgo(date) {
+    const diff = (Date.now() - date) / 1000;
+    if (diff < 60)    return 'just now';
+    if (diff < 3600)  return `${Math.floor(diff/60)}m ago`;
+    if (diff < 86400) return `${Math.floor(diff/3600)}h ago`;
+    return `${Math.floor(diff/86400)}d ago`;
+}
+
+window.submitForumPost = async function() {
+    const tag   = document.getElementById('forum-tag').value;
+    const title = document.getElementById('forum-title').value.trim();
+    const body  = document.getElementById('forum-body').value.trim();
+    if (!title || !body) return alert('Please fill in both the title and body.');
+    try {
+        const res = await fetch('/api/forum/posts', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ tag, title, body })
+        });
+        const post = await res.json();
+        if (post.error) return alert('Error: ' + post.error);
+        document.getElementById('forum-title').value = '';
+        document.getElementById('forum-body').value  = '';
+        // Prepend new post to feed
+        const feed = document.getElementById('forum-feed');
+        if (feed.querySelector('p')) feed.innerHTML = '';
+        feed.insertAdjacentHTML('afterbegin', renderForumPost(post));
+        _forumLoaded = true; // mark loaded so next tab switch doesn't wipe the new post
+    } catch (err) {
+        alert('Failed to post: ' + err.message);
+    }
+};
+
+window.likePost = async function(postId, btn) {
+    if (btn.disabled) return; // prevent double-click spam
+    btn.disabled = true;
+    try {
+        const res = await fetch(`/api/forum/posts/${postId}/like`, { method: 'POST', credentials: 'same-origin' });
+        const data = await res.json();
+        if (data.error) return;
+        btn.classList.toggle('liked', data.liked);
+        btn.innerHTML = `❤️ ${data.likes}`;
+    } catch (err) {
+        console.error('Like failed:', err);
+    } finally {
+        btn.disabled = false;
+    }
+};
 
 const navLinks = document.querySelectorAll('.nav-anchor');
 navLinks.forEach(link => {
     link.parentElement.addEventListener('click', (e) => {
         e.preventDefault();
-        document.querySelectorAll('.link-dock').forEach(item => {
-            item.classList.remove('active');
-        })
-        document.querySelectorAll('.links').forEach(item => {
-            item.classList.remove('active');
-        })
-        link.parentElement.classList.add('active');
         const targetId = link.getAttribute('data-target');
+
+        // Clear all active states in both navs
+        document.querySelectorAll('.link-dock').forEach(item => item.classList.remove('active'));
+        document.querySelectorAll('.links').forEach(item => item.classList.remove('active'));
+
+        // Activate the clicked item
+        link.parentElement.classList.add('active');
+
+        // Sync the counterpart nav (sidebar ↔ dock) so both stay in step
+        document.querySelectorAll('.nav-anchor').forEach(otherLink => {
+            if (otherLink !== link && otherLink.getAttribute('data-target') === targetId) {
+                otherLink.parentElement.classList.add('active');
+            }
+        });
+
         showSection(targetId);
     });
 });
@@ -620,22 +841,44 @@ async function analyzeImage(file) {
                 reader.onerror = reject;
                 reader.readAsDataURL(file);
             });
-            const res = await fetch('/api/gemini/analyze-plant', {
+            const response = await fetch('/api/gemini/analyze-plant', {
                 method: 'POST',
-                headers: { 
-                    'Content-Type': 'application/json', 
-                    'Accept': 'application/json',
-                    'x-gemini-key': key 
-                },
-                body: JSON.stringify({ imageBase64: base64, mimeType: file.type || 'image/jpeg' })
+                credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json', 'x-gemini-key': getGeminiKey() || '' },
+                body: JSON.stringify({ imageBase64: base64, mimeType: file.type })
             });
-            const contentType = res.headers.get("content-type");
-            if (!contentType || !contentType.includes("application/json")) {
-                throw new Error("Session expired. Please refresh the page to sign in again.");
+            // Safe parse: if server returns HTML error page, show a clear message
+            const rawText = await response.text();
+            let data;
+            try {
+                data = JSON.parse(rawText);
+            } catch {
+                throw new Error(`Server returned HTTP ${response.status}. Check your Gemini API key or try again.`);
             }
-            const data = await res.json();
+            
             if (data.error) throw new Error(data.error);
+
+            _lastScannedCrop = data.crop;
+
+            // Use the proper structured renderer (not inline HTML)
             renderGeminiResult(data);
+
+            // Auto-search videos for the disease
+            if (data.disease && data.disease !== 'Healthy' && data.disease !== 'Unknown' && data.crop) {
+                document.getElementById('yt-search-input').value = `how to treat ${data.disease} in ${data.crop}`;
+                searchYouTube();
+            } else if (data.crop && data.crop !== 'Unknown') {
+                document.getElementById('yt-search-input').value = `how to grow ${data.crop}`;
+                searchYouTube();
+            }
+            
+            // Re-fetch agronomy intelligence now that we know their active crop
+            if (selectedLat && selectedLng) {
+                getWeatherByCoords(selectedLat, selectedLng);
+            } else if (userData && userData.location && userData.location.lat) {
+                getWeatherByCoords(userData.location.lat, userData.location.lng);
+            }
+            
         } catch (err) {
             predictionText.innerHTML = `<p style="color:#c00">❌ Gemini error: ${err.message}</p>`;
         }
@@ -663,35 +906,191 @@ async function analyzeImage(file) {
 plantUpload.addEventListener('change', (e) => analyzeImage(e.target.files[0]));
 plantUploadCamera.addEventListener('change', (e) => analyzeImage(e.target.files[0]));
 
-const weatherDiv = document.getElementById('weatherResult');
-let _lastWeatherData = null; // store for farming tips refresh
-
-// Weather by coordinates — fetches data then calls farming tips
+// ── Phase 3: Agronomy Intelligence Pipeline ───────────────────────────────────
 async function getWeatherByCoords(lat, lon) {
-    weatherDiv.innerHTML = '<p style="color:#888">⏳ Fetching weather...</p>';
+    const weatherDiv = document.getElementById('weatherResult');
+    const soilDiv = document.getElementById('soilResult');
+    const cropsDiv = document.getElementById('cropsResult');
+    const fertDiv = document.getElementById('fertilizerResult');
+    const trendsDiv = document.getElementById('trendsResult');
+    const mandiDiv = document.getElementById('mandiResult');
+
+    if (!weatherDiv) return;
+
+    // Set loading states
+    weatherDiv.innerHTML = '<p style="color:#888;font-size:0.9rem">⏳ Fetching weather...</p>';
+    if (soilDiv) soilDiv.innerHTML = '<p style="color:#888;font-size:0.9rem">⏳ Fetching Soil & Climate data...</p>';
+    if (cropsDiv) cropsDiv.innerHTML = '<p style="color:#888;font-size:0.9rem">⏳ Analyzing...</p>';
+    if (fertDiv) fertDiv.innerHTML = '<p style="color:#888;font-size:0.9rem">⏳ Analyzing...</p>';
+    if (trendsDiv) trendsDiv.innerHTML = '<p style="color:#888;font-size:0.9rem">⏳ Analyzing...</p>';
+    if (mandiDiv) mandiDiv.innerHTML = '<p style="color:#888;font-size:0.9rem">⏳ Fetching local APMC prices...</p>';
+
     try {
-        const wres = await fetch(window.location.origin + `/api/openweather/${lat}/${lon}`);
+        // 1. Fetch current weather from OpenWeather
+        const wRes = await fetch(`/api/openweather/${lat}/${lon}`, { credentials: 'same-origin' });
+        const currentData = await wRes.json();
+        if (currentData.error) throw new Error(currentData.error);
         
-        const contentType = wres.headers.get("content-type");
-        if (!contentType || !contentType.includes("application/json")) {
-            throw new Error("Server did not return JSON. Your session may have expired.");
+        const currentWeather = {
+            temp: currentData.temp,
+            humidity: currentData.humidity,
+            condition: currentData.weather,
+            location: currentData.name
+        };
+
+        // Render Weather
+        weatherDiv.innerHTML = `<div style="font-size:0.95rem; line-height:1.6; color:#333;">
+            <p style="margin:0;"><strong>${currentWeather.temp}°C</strong>, ${currentWeather.humidity}% Humidity.</p>
+            <p style="margin:0; text-transform:capitalize">${currentWeather.condition}</p>
+            <p style="margin:0; font-size:0.8rem; color:#888;">📍 ${currentWeather.location}</p>
+        </div>`;
+
+        // Store for getWeather() button
+        _lastWeatherData = { temp: currentWeather.temp, humidity: currentWeather.humidity, weather: currentWeather.condition, name: currentWeather.location };
+        fetchFarmingTips(_lastWeatherData);
+
+        // 2. Fetch raw agronomy data (SoilGrids + OpenMeteo)
+        const aRes = await fetch(`/api/agronomy/${lat}/${lon}`, { credentials: 'same-origin' });
+        const agronomyData = await aRes.json();
+        if (agronomyData.error) throw new Error(agronomyData.error);
+
+        if (soilDiv) soilDiv.innerHTML = '<p style="color:#888;font-size:0.9rem">⏳ Asking Gemini to analyze soil and weather...</p>';
+
+        // 3. Check Cache or Send to Gemini
+        const cacheKey = 'pragati_agronomy_cache';
+        const roundedLat = Number(lat).toFixed(2);
+        const roundedLon = Number(lon).toFixed(2);
+        const cachedStr = localStorage.getItem(cacheKey);
+        
+        let gData = null;
+        if (cachedStr) {
+            try {
+                const cache = JSON.parse(cachedStr);
+                // Valid if same location (within ~1.1km), < 24 hours old, and same scanned crop
+                if (cache.lat === roundedLat && cache.lon === roundedLon && (Date.now() - cache.timestamp < 24 * 60 * 60 * 1000) && cache.scannedCrop === _lastScannedCrop) {
+                    gData = cache.gData;
+                    console.log("Using cached Gemini Agronomy data");
+                }
+            } catch(e) {}
         }
-        
-        const data = await wres.json();
-        _lastWeatherData = { ...data, lat, lon };
 
-        weatherDiv.innerHTML = `
-            <p><strong>${data.name}</strong></p>
-            <p>🌡️ Temperature: <strong>${data.temp}°C</strong></p>
-            <p>🌤️ Weather: ${data.weather}</p>
-            <p>💧 Humidity: ${data.humidity}%</p>
-            <p>💨 Wind: ${data.wind} m/s</p>
-            <div id="farming-tips-box"><p style="color:#888;font-size:0.85rem">⏳ Loading farming tips...</p></div>`;
+        if (!gData) {
+            const geminiRes = await fetch('/api/gemini/agronomy', {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json', 'x-gemini-key': getGeminiKey() || '' },
+                body: JSON.stringify({
+                    soilData: agronomyData.soil,
+                    climateData: agronomyData.climate,
+                    currentWeather: currentWeather,
+                    scannedCrop: _lastScannedCrop
+                })
+            });
+            gData = await geminiRes.json();
+            
+            if (!gData.error) {
+                localStorage.setItem(cacheKey, JSON.stringify({
+                    lat: roundedLat,
+                    lon: roundedLon,
+                    gData: gData,
+                    timestamp: Date.now(),
+                    scannedCrop: _lastScannedCrop
+                }));
+            }
+        }
 
-        fetchFarmingTips(data);
-    } catch (error) {
-        console.error(error);
-        weatherDiv.innerHTML = '<p>Weather data not available!</p>';
+        if (gData.error) {
+            const errHtml = `<p style="color:#c00">Gemini Error: ${escapeHtml(gData.error)}. Set API key.</p>`;
+            if (soilDiv) soilDiv.innerHTML = errHtml;
+            if (cropsDiv) cropsDiv.innerHTML = errHtml;
+            if (fertDiv) fertDiv.innerHTML = errHtml;
+            if (trendsDiv) trendsDiv.innerHTML = errHtml;
+        } else {
+            // Render beautiful individual dashboard cards
+            let cropsHtml = gData.recommended_crops.map(c => `<li style="margin-bottom:8px"><strong>${escapeHtml(c.name)}:</strong> ${escapeHtml(c.reason)}</li>`).join('');
+            let badCropsHtml = gData.not_recommended_crops.map(c => `<li style="margin-bottom:8px; color:#555;"><strong>${escapeHtml(c.name)}:</strong> ${escapeHtml(c.reason)}</li>`).join('');
+
+            // Sanitize all Gemini markdown output before injection (consistent with chatbot)
+            const sp = (txt) => DOMPurify.sanitize(marked.parse(txt || ''));
+
+            if (soilDiv) soilDiv.innerHTML = `<div style="font-size:0.9rem; line-height:1.6; color:#333;">
+                <div style="margin:0;">${sp(gData.soil_health_summary)}</div>
+                <div style="margin:0; padding-top:8px; margin-top:8px; border-top:1px solid #eee;"><strong>⚠️ Risks:</strong> ${sp(gData.climate_weather_risks)}</div>
+            </div>`;
+
+            if (cropsDiv) cropsDiv.innerHTML = `<div style="font-size:0.9rem; line-height:1.6; color:#333;">
+                <ul style="margin:0; padding-left:20px;">${cropsHtml}</ul>
+                <h4 style="color:#d32f2f; margin:15px 0 5px; font-size:1rem;">🚫 Not Recommended</h4>
+                <ul style="margin:0; padding-left:20px;">${badCropsHtml}</ul>
+            </div>`;
+
+            if (fertDiv) fertDiv.innerHTML = `<div style="font-size:0.9rem; line-height:1.6; color:#333; overflow-y:auto;">
+                <div style="margin:0;"><strong>Fertilizer:</strong> ${sp(gData.fertilizer_recommendations)}</div>
+                <div style="margin:0; padding-top:8px; margin-top:8px; border-top:1px solid #eee;"><strong>Pest Control:</strong> ${sp(gData.pesticide_insecticide_advice)}</div>
+            </div>`;
+
+            if (trendsDiv) trendsDiv.innerHTML = `<div style="font-size:0.9rem; line-height:1.6; color:#333;">
+                <div style="margin:0;">${sp(gData.market_trends || gData.marketTrends || 'Market trend analysis is currently unavailable.')}</div>
+            </div>`;
+
+            // Auto-search videos for the top recommended crop (if no crop was scanned)
+            if (!_lastScannedCrop && gData.recommended_crops && gData.recommended_crops.length > 0) {
+                const topCrop = gData.recommended_crops[0].name;
+                document.getElementById('yt-search-input').value = `how to farm ${topCrop} in India`;
+                searchYouTube();
+            }
+        }
+
+        // 4. Fetch Mandi Prices concurrently (independent of Gemini)
+        if (mandiDiv) {
+            try {
+                const mRes = await fetch(`/api/mandi/${lat}/${lon}`, { credentials: 'same-origin' });
+                const mandiData = await mRes.json();
+                
+                if (mandiData.error) throw new Error(mandiData.error);
+                
+                if (!mandiData.records || mandiData.records.length === 0) {
+                    mandiDiv.innerHTML = `<p style="color:#888; font-size:0.9rem;">No recent mandi data found for ${escapeHtml(mandiData.district)}, ${escapeHtml(mandiData.state)}.</p>`;
+                } else {
+                    let mandiHtml = `<p style="margin:0 0 10px; color:#2e7d32; font-size:0.9rem;"><strong>Market:</strong> ${escapeHtml(mandiData.records[0].market)}, ${escapeHtml(mandiData.district)}</p>
+                    <table style="width:100%; border-collapse:collapse; font-size:0.85rem; text-align:left;">
+                        <tr style="border-bottom:2px solid #ccc;">
+                            <th style="padding:6px 0;">Commodity</th>
+                            <th style="padding:6px 0;">Min</th>
+                            <th style="padding:6px 0;">Max</th>
+                        </tr>`;
+                    
+                    mandiData.records.forEach(r => {
+                        const minKg = (r.min_price / 100).toFixed(1);
+                        const maxKg = (r.max_price / 100).toFixed(1);
+                        // Use data-attributes instead of inline onclick to prevent quote-injection XSS
+                        mandiHtml += `<tr style="border-bottom:1px solid #eee;">
+                            <td style="padding:8px 0; color:#333;">${escapeHtml(r.commodity)} <span style="color:#888;font-size:0.75rem">(${escapeHtml(r.variety)})</span></td>
+                            <td style="padding:8px 0; color:#2e7d32; font-weight:bold;">&#8377;${minKg}/kg</td>
+                            <td style="padding:8px 0; color:#c00;">&#8377;${maxKg}/kg</td>
+                            <td style="padding:8px 0; text-align:right;">
+                                <button class="pin-crop-btn" data-commodity="${escapeHtml(r.commodity)}" data-min="${minKg}" data-max="${maxKg}" data-market="${escapeHtml(r.market)}" style="background:none; border:none; cursor:pointer; font-size:1.1rem; padding:0;" title="Pin to Farm Dashboard">&#128204;</button>
+                            </td>
+                        </tr>`;
+                    });
+                    mandiHtml += `</table>`;
+                    mandiDiv.innerHTML = mandiHtml;
+                    // Event delegation — safer than inline onclick; reads data-attributes set above
+                    mandiDiv.querySelectorAll('.pin-crop-btn').forEach(btn => {
+                        btn.addEventListener('click', () => {
+                            pinCrop(btn.dataset.commodity, btn.dataset.min, btn.dataset.max, btn.dataset.market);
+                        });
+                    });
+                    renderPinnedCrop(); // Refresh pinned view
+                }
+            } catch (err) {
+                mandiDiv.innerHTML = `<p style="color:#c00">Failed to load market data: ${err.message}</p>`;
+            }
+        }
+
+    } catch (err) {
+        const weatherDivErr = document.getElementById('weatherResult');
+        if (weatherDivErr) weatherDivErr.innerHTML = `<p style="color:#c00">Failed to load agronomy data: ${err.message}</p>`;
     }
 }
 
@@ -712,6 +1111,7 @@ async function fetchFarmingTips(data) {
     try {
         const res = await fetch('/api/gemini/farming-tips', {
             method: 'POST',
+            credentials: 'same-origin',
             headers: geminiHeaders(),
             body: JSON.stringify({
                 temp: data.temp, humidity: data.humidity,
@@ -746,21 +1146,87 @@ function staticFarmingTip(data) {
 }
 
 // Map Initialization
+let mapInstance = null;
+let farmMarker = null;
+let selectedLat = null;
+let selectedLng = null;
+
 function initMap(lat, lon) {
-    const map = L.map('map', { zoomControl: true }).setView([lat, lon], 10);
+    if (mapInstance) {
+        mapInstance.setView([lat, lon], 10);
+        if (farmMarker) {
+            farmMarker.setLatLng([lat, lon]);
+        }
+        return;
+    }
+
+    mapInstance = L.map('map', { zoomControl: true }).setView([lat, lon], 10);
     L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
         attribution: 'Map data © OpenStreetMap contributors, SRTM | Map style: © OpenTopoMap (CC-BY-SA)',
         keepBuffer: 8,
-    }).addTo(map);
-    L.marker([lat, lon]).addTo(map).bindPopup('You are here!').openPopup();
+    }).addTo(mapInstance);
+    
+    farmMarker = L.marker([lat, lon]).addTo(mapInstance).bindPopup('Farm Location').openPopup();
+
+    // Allow user to click to drop a new pin
+    mapInstance.on('click', function(e) {
+        selectedLat = e.latlng.lat;
+        selectedLng = e.latlng.lng;
+        farmMarker.setLatLng(e.latlng).bindPopup('New Farm Location').openPopup();
+        
+        document.getElementById('map-status').textContent = `Selected: ${selectedLat.toFixed(4)}, ${selectedLng.toFixed(4)}`;
+        document.getElementById('save-location-btn').style.display = 'inline-block';
+    });
 }
 
+document.getElementById('save-location-btn').addEventListener('click', async () => {
+    if (!selectedLat || !selectedLng) return;
+    
+    const btn = document.getElementById('save-location-btn');
+    btn.textContent = 'Saving...';
+    btn.disabled = true;
+
+    try {
+        const res = await fetch('/api/user/location', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ lat: selectedLat, lng: selectedLng })
+        });
+        
+        const data = await res.json();
+        if (data.success) {
+            document.getElementById('map-status').textContent = '✅ Location saved to your profile.';
+            // Also update weather for new location immediately
+            getWeatherByCoords(selectedLat, selectedLng);
+            userData.location = { lat: selectedLat, lng: selectedLng };
+        } else {
+            document.getElementById('map-status').textContent = '❌ Failed to save location.';
+        }
+    } catch (err) {
+        document.getElementById('map-status').textContent = '❌ Error saving location.';
+    }
+    
+    btn.textContent = 'Save Location';
+    btn.disabled = false;
+    btn.style.display = 'none';
+});
+
 // Map is lazy-initialized only when ai-toolkit section is shown
-// (Leaflet can't render in a hidden element)
 let mapInitialized = false;
 function getLocationAndStart() {
     if (mapInitialized) return;
-    if (navigator.geolocation) {
+    
+    if (userData && userData.location && userData.location.lat) {
+        // User has a saved location in DB
+        const lat = userData.location.lat;
+        const lon = userData.location.lng;
+        mapInitialized = true;
+        initMap(lat, lon);
+        getWeatherByCoords(lat, lon);
+        document.getElementById('map-status').textContent = `Farm loaded: ${lat.toFixed(4)}, ${lon.toFixed(4)}`;
+    } else if (navigator.geolocation) {
+        // Fallback to current GPS if no saved location
         navigator.geolocation.getCurrentPosition(position => {
             const lat = position.coords.latitude;
             const lon = position.coords.longitude;
@@ -768,10 +1234,19 @@ function getLocationAndStart() {
             initMap(lat, lon);
             getWeatherByCoords(lat, lon);
         }, () => {
-            weatherDiv.innerHTML = '<p>Unable to fetch location. Please allow location access.</p>';
+            document.getElementById('map-status').textContent = 'Unable to fetch location. Please click the map to set farm manually.';
+            const wRes = document.getElementById('weatherResult');
+            if (wRes) wRes.innerHTML = '<p>Click map to fetch location.</p>';
+            // Show a default map over India so they can still click
+            mapInitialized = true;
+            initMap(20.5937, 78.9629); 
         });
     } else {
-        weatherDiv.innerHTML = '<p>Geolocation not supported by this browser.</p>';
+        document.getElementById('map-status').textContent = 'Geolocation not supported. Click the map to set farm manually.';
+        const wRes = document.getElementById('weatherResult');
+        if (wRes) wRes.innerHTML = '<p>Click map to fetch location.</p>';
+        mapInitialized = true;
+        initMap(20.5937, 78.9629);
     }
 }
 
@@ -795,7 +1270,8 @@ async function searchYouTube() {
 
     try {
         const res  = await fetch(`/api/gemini/youtube?q=${encodeURIComponent(query)}`, {
-            headers: { 'x-gemini-key': getGeminiKey() || '' }
+            credentials: 'same-origin',
+            headers: geminiHeaders()
         });
 
         const contentType = res.headers.get("content-type");
@@ -818,12 +1294,12 @@ async function searchYouTube() {
         }
 
         results.innerHTML = videos.map(v => `
-            <a class="yt-card" href="${v.url || v.link || '#'}" target="_blank" rel="noopener">
-                <img class="yt-thumb" src="${v.thumbnail || v.thumb || ''}" alt="${v.title || ''}"
+            <a class="yt-card" href="${encodeURI(v.url || v.link || '#')}" target="_blank" rel="noopener">
+                <img class="yt-thumb" src="${v.thumbnail || v.thumb || ''}" alt="${escapeHtml(v.title || '')}"
                      onerror="this.style.display='none'">
                 <div class="yt-card-info">
-                    <p class="yt-card-title">${v.title || 'Untitled'}</p>
-                    <p class="yt-card-channel">${v.channel || v.channelTitle || ''}</p>
+                    <p class="yt-card-title">${escapeHtml(v.title || 'Untitled')}</p>
+                    <p class="yt-card-channel">${escapeHtml(v.channel || v.channelTitle || '')}</p>
                 </div>
             </a>`).join('');
     } catch (err) {
@@ -870,13 +1346,13 @@ function success() {
 }
 
 async function logout() {
-    await Clerk.signOut();
+    // Only call one revocation method to avoid double-session-revoke
     window.location.href = window.location.origin + '/private/logout';
 }
 
 // course js @Rouvik Maji
 async function listCourses() {
-    const res = await fetch('/api/getcourses');
+    const res = await fetch('/api/getcourses', { credentials: 'same-origin' });
     const ct  = res.headers.get('content-type');
     if (!ct || !ct.includes('application/json')) return; // session expired — silently bail
     const data = await res.json();
@@ -884,24 +1360,33 @@ async function listCourses() {
     const courseList = document.querySelector('.courses-grid');
     courseList.innerHTML = '';
 
-    for (const course of data) {
+    const uniqueCourses = [];
+    const seenPlaylists = new Set();
+    for (const c of data) {
+        if (!seenPlaylists.has(c.playlist)) {
+            seenPlaylists.add(c.playlist);
+            uniqueCourses.push(c);
+        }
+    }
+
+    for (const course of uniqueCourses) {
         const card = document.createElement('div');
         card.classList.add('course-card');
 
         // fetch thumbnail (YouTube API) — gracefully degrade if unavailable
         let imgSrc = '';
         try {
-            const imgres = await fetch(window.location.origin + `/api/youtubethumb/${course.playlist}`);
+            const imgres = await fetch(window.location.origin + `/api/youtubethumb/${course.playlist}`, { credentials: 'same-origin' });
             const imgdata = await imgres.json();
             imgSrc = imgdata.img || '';
         } catch (_) {}
 
         card.innerHTML = `
-            ${imgSrc ? `<img src="${imgSrc}" alt="${course.name}" />` : '<div class="no-thumb">📚</div>'}
-            <h3>${course.name}</h3>
-            <p>${course.description}</p>
-            <p><b>Medium</b>: ${course.medium || 'Hindi'}</p>
-            <button class="enroll-btn" data-coursename="${course.name}" data-courseplaylist="${course.playlist}" data-courseid="${course._id}" onclick="courseHandler(this);">▶ Watch</button>
+            ${imgSrc ? `<img src="${imgSrc}" alt="${escapeHtml(course.name)}" />` : '<div class="no-thumb">📚</div>'}
+            <h3>${escapeHtml(course.name)}</h3>
+            <p>${escapeHtml(course.description)}</p>
+            <p><b>Medium</b>: ${escapeHtml(course.medium || 'Hindi')}</p>
+            <button class="enroll-btn" data-coursename="${escapeHtml(course.name)}" data-courseplaylist="${escapeHtml(course.playlist)}" data-courseid="${course._id}" onclick="courseHandler(this);">▶ Watch</button>
         `;
         courseList.appendChild(card);
     }
@@ -917,6 +1402,7 @@ async function courseHandler(button) {
     try {
         const res = await fetch('/api/addcourse', {
             method: 'POST',
+            credentials: 'same-origin',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ courseName: button.dataset.coursename })
         });
@@ -933,5 +1419,4 @@ async function courseHandler(button) {
     }
 
     window.location.href = window.location.origin + '/private/Player/player.html';
-}
-// Dead code removed — old listCourses() replaced by active version above
+}

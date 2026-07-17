@@ -32,6 +32,28 @@
 
                 Clerk.mountSignIn(document.getElementById("signinDiv"), {
                     redirectUrl: window.location.origin + "/private/Dashboard/dashboard.html",
+                    appearance: {
+                        variables: {
+                            colorPrimary: '#2e7d32',
+                            colorBackground: '#fefae0',
+                            colorText: '#1b5e20',
+                            colorInputBackground: '#fefae0',
+                            colorInputText: '#1b5e20',
+                            colorTextOnPrimaryBackground: '#ffffff',
+                            fontFamily: '"Poppins", sans-serif',
+                            borderRadius: '12px'
+                        },
+                        elements: {
+                            cardBox: {
+                                border: '2px solid #2e7d32',
+                                borderRadius: '12px',
+                                boxShadow: '0 8px 32px rgba(46, 125, 50, 0.2)'
+                            },
+                            formFieldInput: {
+                                border: '1px solid #2e7d32'
+                            }
+                        }
+                    }
                 });
 
             } catch (error) {

@@ -1,7 +1,7 @@
 body {
-    background: linear-gradient(45deg, rgb(218, 0, 87), rgb(0, 0, 163));
-
+    background-color: #fefae0;
     overflow-x: hidden;
+    color: #1b5e20;
 }
 
 .container {
@@ -9,12 +9,9 @@ body {
     flex-direction: column;
     align-items: center;
     justify-content: center;
-
     min-height: 100vh;
     width: 100vw;
-
-    font-family: 'Poppins';
-
+    font-family: 'Poppins', sans-serif;
     overflow-x: hidden;
     overflow-y: auto;
 }

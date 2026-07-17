@@ -15,7 +15,7 @@ async function sendChatMessage() {
 
     const userDiv = document.createElement("div");
     userDiv.classList.add("user-message");
-    userDiv.innerHTML = query;
+    userDiv.textContent = query; // textContent prevents XSS (was innerHTML)
     chatContainer.appendChild(userDiv);
     messageInput.value = "";
 
@@ -28,6 +28,7 @@ async function sendChatMessage() {
     try {
         const res = await fetch(window.location.origin + "/api/gemini/chat", {
             method: "POST",
+            credentials: 'same-origin',
             headers: {
                 "Content-Type": "application/json",
                 "x-gemini-key": localStorage.getItem('gemini_api_key') || ''
@@ -43,9 +44,12 @@ async function sendChatMessage() {
         if (data.error && data.error.includes('No Gemini API key')) {
             botDiv.innerHTML = "⚠️ No Gemini API key set. Go to the dashboard and click <b>🔑 API Key</b> to add yours.";
         } else {
-            botDiv.innerHTML = typeof marked !== "undefined"
+            let rawHtml = typeof marked !== "undefined"
                 ? marked.parse(data.response || data.error || "Error")
                 : (data.response || data.error || "Error");
+            botDiv.innerHTML = (typeof DOMPurify !== "undefined") 
+                ? DOMPurify.sanitize(rawHtml) 
+                : rawHtml;
         }
     } catch (err) {
         botDiv.innerHTML = "Failed to connect. Please try again.";
