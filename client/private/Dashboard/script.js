@@ -750,7 +750,7 @@ navLinks.forEach(link => {
 
 //ai-toolkit js ── Plant Disease Detection
 // Primary:  Gemini Vision  (when X-Gemini-Key is set)
-// Fallback: MobileNetV3-Large (94-class, LiteRT WebGPU)
+// Fallback: MobileNetV3-Large (128-class, LiteRT WebGPU)
 // ─────────────────────────────────────────────────────
 
 const plantUpload       = document.getElementById('upload');

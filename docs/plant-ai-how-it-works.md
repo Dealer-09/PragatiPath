@@ -1,6 +1,6 @@
 # PragatiPath — Plant Disease AI: How It Works
 
-> **Current System (V2):** MobileNetV3-Large trained on a 128-class unified dataset (PlantVillage + PlantDoc + BD), running entirely offline via LiteRT WebGPU.
+> **Current System (V2):** Dual-engine architecture. **Primary:** Gemini Vision (requires BYOK key). **Fallback:** MobileNetV3-Large trained on a 128-class unified dataset (PlantVillage + PlantDoc + BD), running entirely offline via LiteRT WebGPU.
 
 ---
 
@@ -24,16 +24,44 @@ To cure the Clever Hans bias, we threw out the V1 architecture and completely re
 Merging 3 disparate datasets normally corrupts the neural network because of "Label Collisions" (e.g., ID 5 means "Apple Rust" in Dataset A, but "Tomato Blight" in Dataset B). We wrote a Python ETL pipeline that recursively parsed all 3 HuggingFace repositories and automatically built a mathematically perfect **128-Class Master Dictionary** (`master_dict.json`) to unify the tensors.
 
 ### The Architecture: MobileNetV3
-We migrated from ViT-tiny to **MobileNetV3-Large**. While ViT is powerful, MobileNet is inherently designed for mobile devices. We compiled the model specifically for **WebGPU inference** by mathematically locking the tensor batch size to `1` and preserving pure `Float32` precision.
+We migrated from ViT-tiny to **MobileNetV3-Large**. While ViT is powerful, MobileNet is inherently designed for mobile devices. The final output layer uses `activation="softmax"` baked in at training time, so inference output values are true probabilities (0.0–1.0), not raw logits. We compiled the model specifically for **WebGPU inference** by mathematically locking the tensor batch size to `1` and preserving pure `Float32` precision.
 
 ---
 
-## ⚙️ Infrastructure & Runtime Cascade
+## ⚙️ The Actual Branching Logic (Gemini vs Offline)
 
-Rather than relying on a single runtime that might fail on older devices, the MobileNetV3 architecture uses a robust execution cascade natively built into the web app:
+> **Important:** The choice between Gemini Vision and the offline model is a **hard binary branch** based solely on whether the user has set a Gemini API key. It is NOT an automated cascade based on confidence scores.
 
 ```text
-User uploads leaf
+User uploads leaf photo
+        ↓
+analyzeImage() checks: does localStorage have 'gemini_api_key'?
+        ↓
+    ┌───────────────────┬───────────────────────┐
+    │ YES (key exists)  │ NO (no key)           │
+    ↓                   ↓
+Gemini Vision path  Offline MobileNet path
+(server-side)       (browser-side, no network)
+    ↓                   ↓
+Returns structured  Returns top-5 predictions
+diagnosis JSON      with softmax confidences
+    ↓                   ↓
+If Gemini errors →  If top confidence < 60% →
+shows error, does   shows UI hint suggesting
+NOT auto-switch     user set a Gemini key
+to offline model    (no auto-escalation)
+```
+
+**The "Low Confidence" message** at the end of the offline path is purely UI text — it suggests the user manually set a Gemini key. There is no automated escalation between modes.
+
+---
+
+## ⚙️ Offline Runtime Cascade (within the Offline path)
+
+When no API key is set, LiteRT.js handles runtime selection internally:
+
+```text
+User uploads leaf (no API key set)
        ↓
 PlantAI.predict() initializes liteRtModule
        ↓
@@ -49,7 +77,7 @@ PlantAI.predict() initializes liteRtModule
 │    Latency: ~120ms (Universally compatible)                │
 └────────────────────────────────────────────────────────────┘
        ↓
-Outputs 128-class Softmax
+Outputs 128-class softmax probabilities (baked into model)
 ```
 
 ## 🗂 File Placement
@@ -57,7 +85,7 @@ Outputs 128-class Softmax
 ```text
 PragatiPath/
 └── client/public/assets/plant-disease-mobilenet/
-    ├── model.tflite              ← Primary Offline model (15 MB)
+    ├── model.tflite              ← Primary Offline model (12.4 MB, Float32)
     ├── class_labels.json         ← 128-class unified mapping
     ├── infer.js                  ← The cascade logic script
 ```
@@ -70,8 +98,10 @@ The fundamental trade-off of AI is that **Offline Models are bounded** by their 
 
 To solve this, PragatiPath uses a **Hybrid Architecture**:
 
-1. **First Line of Defense (Offline MobileNet):** The browser uses LiteRT.js to run the `.tflite` model locally. It requires zero internet connection and provides instant triage.
-2. **The Cloud Escalation (Gemini Vision):** If the offline model yields Low Confidence, the farmer can escalate the photo to Google Gemini 2.5 (using a BYOK architecture), which has an infinite vocabulary to diagnose obscure pests.
+1. **Primary (Gemini Vision):** If the user has a Gemini API key configured, every scan goes to Gemini 2.5 Flash. It has an infinite vocabulary, can identify virtually any plant disease, and outputs structured treatment/prevention advice.
+2. **Fallback (Offline MobileNet):** If no key is set, the browser runs the `.tflite` model locally via LiteRT.js. Zero internet required, instant inference, fully private.
+
+The user bridges these modes **manually** — the UI shows a prompt suggesting they configure a Gemini key if the offline model returns low confidence.
 
 ---
 
@@ -80,6 +110,7 @@ To solve this, PragatiPath uses a **Hybrid Architecture**:
 To push the offline model even closer to Gemini's accuracy, future iterations can implement:
 
 1. **Vocabulary Expansion:** Ingest more diverse datasets (e.g., iNaturalist, specialized pest datasets) and map them into the `master_dict.json` to push the boundary from 128 classes to 300+ classes.
-2. **Heavier Architectures:** Upgrade the Kaggle script from MobileNetV3 to **EfficientNetB3** or **ResNet50**. This trades file size (15MB -> 50MB) and latency for much deeper visual reasoning.
+2. **Heavier Architectures:** Upgrade the Kaggle script from MobileNetV3 to **EfficientNetB3** or **ResNet50**. This trades file size (12MB → 50MB) and latency for much deeper visual reasoning.
 3. **Aggressive Data Augmentation:** Introduce `RandomRotation` and `RandomZoom` layers during the Kaggle training loop to artificially simulate strange smartphone camera angles and harsh sunlight.
 4. **YOLO Object Detection:** Instead of full-image classification, train a YOLOv8 model to strictly draw bounding boxes over the diseased spots, completely bypassing background noise entirely.
+5. **Auto-escalation on Low Confidence:** If the offline model confidence < 60% AND a Gemini key exists, automatically re-run the scan via Gemini Vision without requiring the user to manually re-upload.

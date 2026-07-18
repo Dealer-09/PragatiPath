@@ -233,15 +233,19 @@ async function endpoint_getAgronomyData(req, res) {
         }
 
         // Extract and simplify soil data
+        // Apply ISRIC-confirmed conversions deterministically here so Gemini receives
+        // already-correct values — not raw scaled integers it must remember to divide.
+        // Conversion table (ISRIC docs): phh2o ÷10 → pH, sand/silt/clay ÷10 → %, soc ÷10 → g/kg
+        const SOILGRIDS_SCALE = { phh2o: 10, sand: 10, silt: 10, clay: 10, soc: 10 };
         const soilProps = {};
         if (soilData.properties && soilData.properties.layers) {
             soilData.properties.layers.forEach(layer => {
                 const name = layer.name;
                 const depthData = layer.depths && layer.depths[0]; // 0-5cm
                 if (depthData && depthData.values && depthData.values.mean !== undefined) {
-                    // SoilGrids values are scaled (pH is *10, others are *10 or similar depending on property)
-                    // We just pass the raw/mean value to Gemini with context
-                    soilProps[name] = depthData.values.mean;
+                    const raw = depthData.values.mean;
+                    const divisor = SOILGRIDS_SCALE[name] || 1;
+                    soilProps[name] = parseFloat((raw / divisor).toFixed(2));
                 }
             });
         }
@@ -295,8 +299,7 @@ async function endpoint_geminiAgronomyIntelligence(req, res) {
 You are an expert, highly conservative Indian agronomist. 
 Analyze the following highly localized data for a farmer's plot:
 
-1. Soil Data (0-5cm mean): ${JSON.stringify(soilData)}
-(Note: phh2o is pH * 10. sand/silt/clay are in g/kg, so divide by 10 for percentage).
+1. Soil Data (0-5cm depth, already converted to human units — pH, %, g/kg): ${JSON.stringify(soilData)}
 2. Historical Climate (5-year averages): ${JSON.stringify(climateData)}
 3. Current Weather: ${JSON.stringify(currentWeather)}
 4. Crop currently grown (if any): ${scannedCrop ? scannedCrop : 'Unknown / Not provided'}
