@@ -23,7 +23,7 @@ window.fetch = function(url, opts = {}) {
 
 let userData = null;
 let _lastScannedCrop = null;
-let _lastWeatherData = null; // populated after each weather fetch, used by getWeather() button
+let _lastWeatherData = null; // populated after each weather fetch
 let _lastScanResult = null;  // last plant scan result object (Gemini or offline)
 let _lastScanFile   = null;  // last image File object used for scan (for Web Share API)
 
@@ -167,7 +167,6 @@ const monthLabel = document.getElementById("month-label");
 const progressBar = document.getElementById("progress-bar");
 const progressText = document.getElementById("progress-text");
 const resetBtn = document.getElementById("reset-progress");
-const languageInfo = document.getElementById("language-info");
 const notesList = document.getElementById('notes-list');
 const newNoteInput = document.getElementById('new-note');
 const addNoteBtn = document.getElementById('add-note');
@@ -302,15 +301,6 @@ function generateCalendar() {
     });
 }
 
-function detectLanguage() {
-    const lang = navigator.language || navigator.userLanguage;
-    const map = {
-        'hi': '🌍 आपकी भाषा पहचानी गई: हिंदी',
-        'bn': '🌍 আপনার ভাষা: বাংলা',
-        'ta': '🌍 உங்கள் மொழி: தமிழ்'
-    };
-    languageInfo.textContent = map[lang.slice(0, 2)] || `🌍 Detected Language: ${lang}`;
-}
 
 function loadNotes() {
     const savedNotes = JSON.parse(localStorage.getItem('quickNotes')) || [];
@@ -573,7 +563,6 @@ window.addEventListener('load', async () => {
     });
 
     // Initialize components
-    detectLanguage();
     generateCalendar();
     loadNotes();
     setupChat();
@@ -1339,14 +1328,6 @@ function getLocationAndStart() {
     }
 }
 
-// "Get Weather" button — re-fetches without reinitialising the map
-function getWeather() {
-    if (_lastWeatherData) {
-        fetchFarmingTips(_lastWeatherData);
-    } else {
-        getLocationAndStart();
-    }
-}
 
 // ── YouTube Search (Gemini-powered) ──────────────────────────────────────────
 async function searchYouTube() {

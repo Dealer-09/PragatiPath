@@ -1,4 +1,4 @@
-const { connectDB, Users, Courses, middleware_userAuth, endpoint_userInfo, endpoint_saveLocation, endpoint_addCourse, endpoint_removeCourse, endpoint_updateCourseProgress, endpoint_getCourseList, endpoint_getCourseByName, endpoint_createForumPost, endpoint_getForumPosts, endpoint_likeForumPost } = require('./DBHandler.js');
+const { connectDB, middleware_userAuth, endpoint_userInfo, endpoint_saveLocation, endpoint_addCourse, endpoint_removeCourse, endpoint_updateCourseProgress, endpoint_getCourseList, endpoint_getCourseByName, endpoint_createForumPost, endpoint_getForumPosts, endpoint_likeForumPost } = require('./DBHandler.js');
 const { endpoint_getChannelInfo, endpoint_youtubePlaylistImg, endpoint_geminiYoutubeSearch, endpoint_openWeatherAPI, endpoint_chatbot, endpoint_getAgronomyData, endpoint_geminiAgronomyIntelligence, endpoint_getMandiPrices, endpoint_getSchemes, endpoint_checkSchemeEligibility } = require('./aiSearch.js');
 
 // express

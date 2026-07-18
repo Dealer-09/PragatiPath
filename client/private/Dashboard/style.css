@@ -642,15 +642,6 @@ button:hover {
     animation: bounce 0.5s ease-in-out;
 }
 
-/*  Language Info Styling */
-#language-info {
-    font-size: 14px;
-    margin-bottom: 5px;
-    display: none;
-    text-align: center;
-    color: #444;
-    font-style: italic;
-}
 
 .right-side {
     width: 40%;
@@ -806,10 +797,6 @@ button:hover {
     border: none;
 }
 
-/* #mic-toggle {
-  margin-left: 10px;
-  flex-shrink: 0;
-} */
 
 #send-button:hover {
     background: #38798e;
@@ -1416,20 +1403,6 @@ input[type="file"]:hover {
     background: #47c4e3;
 }
 
-/*.course-card .progress-bar {
-  height: 6px;
-  background: #ddd;
-  border-radius: 3px;
-  overflow: hidden;
-  margin-bottom: 10px;
-}
-
-.course-card .progress-fill {
-  height: 100%;
-  background: linear-gradient(to right, #4caf50, #8bc34a);
-  transition: width 0.3s ease;
-}
-*/
 
 @media (max-width: 1250px) {
     .dashboard-content {
@@ -1614,59 +1587,6 @@ input[type="file"]:hover {
     }
 }
 
-/* @media (max-width: 400px) {
-    h2 {
-        font-size: 18px;
-    }
-
-    .calendar td {
-        font-size: 12px;
-        padding: 5px;
-    }
-
-    #month-label {
-        font-size: 16px;
-    }
-
-    .task-box {
-        font-size: 13px;
-    }
-
-    #progress-bar {
-        height: 16px;
-    }
-
-    #progress-text {
-        font-size: 13px;
-    }
-} */
-
-/* Responsive fix for small screens */
-/* @media (max-width: 400px) {
-
-    .calendar-header,
-    .progress-container {
-        flex-direction: row;
-        flex-wrap: nowrap;
-        justify-content: center;
-    }
-
-    button,
-    #reset-btn {
-        flex-shrink: 0;
-        padding: 6px 10px;
-        font-size: 12px;
-    }
-
-    #progress-bar {
-        width: 100px;
-        height: 14px;
-    }
-
-    #progress-text {
-        font-size: 12px;
-    }
-} */
 
 
 /* Hide google translate */
